@@ -114,7 +114,18 @@ if (NOT ANDROID)
         # Differentiate macOS and iOS bundle setup
         if(DEFINED CMAKE_SYSTEM_NAME AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
             add_executable(rpcs3 MACOSX_BUNDLE)
-            # iOS: no update helper script or macOS-specific plist
+            # Set iOS-specific Info.plist and entitlements
+            set_target_properties(rpcs3
+                PROPERTIES
+                    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/rpcs3_ios.plist.in"
+                    XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_CURRENT_SOURCE_DIR}/rpcs3_ios.entitlements"
+                    XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2")
+            # Link required iOS frameworks
+            target_link_libraries(rpcs3 PRIVATE
+                "-framework UIKit"
+                "-framework Foundation"
+                "-framework Metal"
+                "-framework QuartzCore")
         else()
             add_executable(rpcs3 MACOSX_BUNDLE)
             target_sources(rpcs3 PRIVATE rpcs3.icns update_helper.sh)
