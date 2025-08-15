@@ -188,22 +188,28 @@ set_target_properties(rpcs3_ui
 # https://docs.microsoft.com/en-us/windows/win32/winprog/using-the-windows-headers#faster-builds-with-smaller-header-files
 target_compile_definitions(rpcs3_ui PRIVATE WIN32_LEAN_AND_MEAN)
 
-target_link_libraries(rpcs3_ui
-    PUBLIC
-        rpcs3_emu
-        3rdparty::qt6
-        3rdparty::yaml-cpp
-        3rdparty::zlib
-        3rdparty::discordRPC
-        3rdparty::hidapi
-        3rdparty::libusb
-        3rdparty::wolfssl
-        3rdparty::libcurl
-        3rdparty::opencv
-        3rdparty::fusion
+set(RPCS3_UI_PUBLIC_LIBS
+    rpcs3_emu
+    3rdparty::qt6
+    3rdparty::yaml-cpp
+    3rdparty::zlib
+    3rdparty::discordRPC
+    3rdparty::wolfssl
+    3rdparty::libcurl
+    3rdparty::opencv
+    3rdparty::fusion)
 
-    PRIVATE
-        3rdparty::pugixml
-        3rdparty::libpng
-        3rdparty::7zip
-        3rdparty::rtmidi)
+# Conditionally include HIDAPI and libusb (not available on iOS)
+if(APPLE AND DEFINED CMAKE_SYSTEM_NAME AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    message(STATUS "iOS: Skipping HIDAPI and libusb for rpcs3_ui")
+else()
+    list(APPEND RPCS3_UI_PUBLIC_LIBS 3rdparty::hidapi 3rdparty::libusb)
+endif()
+
+set(RPCS3_UI_PRIVATE_LIBS
+    3rdparty::pugixml
+    3rdparty::libpng
+    3rdparty::7zip
+    3rdparty::rtmidi)
+
+target_link_libraries(rpcs3_ui PUBLIC ${RPCS3_UI_PUBLIC_LIBS} PRIVATE ${RPCS3_UI_PRIVATE_LIBS})

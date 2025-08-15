@@ -212,6 +212,17 @@ if(USE_VULKAN)
 	endif()
 
 	find_package(Vulkan)
+	# Fallback for iOS builds: allow user-specified MoltenVK include/lib without FindVulkan
+	if(NOT VULKAN_FOUND AND APPLE AND DEFINED CMAKE_SYSTEM_NAME AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
+		if(DEFINED Vulkan_INCLUDE_DIR AND EXISTS "${Vulkan_INCLUDE_DIR}" AND DEFINED Vulkan_LIBRARY AND EXISTS "${Vulkan_LIBRARY}")
+			add_library(Vulkan::Vulkan UNKNOWN IMPORTED)
+			set_target_properties(Vulkan::Vulkan PROPERTIES
+				IMPORTED_LOCATION "${Vulkan_LIBRARY}"
+				INTERFACE_INCLUDE_DIRECTORIES "${Vulkan_INCLUDE_DIR}")
+			set(VULKAN_FOUND TRUE)
+		endif()
+	endif()
+
 	if(VULKAN_FOUND)
 		add_library(3rdparty_vulkan INTERFACE)
 		target_compile_definitions(3rdparty_vulkan INTERFACE -DHAVE_VULKAN)
@@ -229,7 +240,7 @@ if(USE_VULKAN)
 	else()
 		message(WARNING "USE_VULKAN was enabled, but libvulkan was not found. RPCS3 will be compiled without Vulkan support.")
 		if(APPLE)
-			message(FATAL_ERROR "To build without Vulkan support on macOS, please disable USE_VULKAN.")
+			message(FATAL_ERROR "To build without Vulkan support on macOS/iOS, please disable USE_VULKAN.")
 		endif()
 	endif()
 endif()

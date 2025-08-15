@@ -7,6 +7,7 @@ namespace vk
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+#include <MoltenVK/mvk_vulkan.h>
 	using swapchain_iOS = native_swapchain_base;
 	using swapchain_NATIVE = swapchain_iOS;
 

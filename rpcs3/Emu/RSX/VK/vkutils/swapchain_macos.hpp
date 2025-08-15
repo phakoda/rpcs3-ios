@@ -5,6 +5,8 @@
 namespace vk
 {
 #if defined(__APPLE__)
+#include <TargetConditionals.h>
+#if !defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE
 	using swapchain_MacOS = native_swapchain_base;
 	using swapchain_NATIVE = swapchain_MacOS;
 
@@ -19,5 +21,6 @@ namespace vk
 		CHECK_RESULT(vkCreateMacOSSurfaceMVK(vk_instance, &createInfo, NULL, &result));
 		return result;
 	}
+#endif
 #endif
 }
