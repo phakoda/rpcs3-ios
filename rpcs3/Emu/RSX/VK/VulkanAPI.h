@@ -4,7 +4,12 @@
 #ifdef _WIN32
 #define VK_USE_PLATFORM_WIN32_KHR
 #elif defined(__APPLE__)
+#include <TargetConditionals.h>
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+#define VK_USE_PLATFORM_IOS_MVK
+#else
 #define VK_USE_PLATFORM_MACOS_MVK
+#endif
 #elif defined(ANDROID)
 #define VK_USE_PLATFORM_ANDROID_KHR
 #else
@@ -30,6 +35,7 @@
 // Undefine header configuration variables
 #undef VK_USE_PLATFORM_WIN32_KHR
 #undef VK_USE_PLATFORM_MACOS_MVK
+#undef VK_USE_PLATFORM_IOS_MVK
 #undef VK_USE_PLATFORM_ANDROID_KHR
 #undef VK_USE_PLATFORM_XLIB_KHR
 #undef VK_USE_PLATFORM_WAYLAND_KHR
