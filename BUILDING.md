@@ -189,3 +189,21 @@ If compiling for ARM, pass the flag `-DUSE_NATIVE_INSTRUCTIONS=OFF` to the first
 
 When using GDB, configure it to ignore SIGSEGV signal (`handle SIGSEGV nostop noprint`).
 If desired, use the various build options in [CMakeLists](https://github.com/RPCS3/rpcs3/blob/master/CMakeLists.txt).
+
+### iOS/iPadOS (experimental)
+
+- Requires: Xcode 15+, iOS/iPadOS 15+, CMake 3.28+, Qt 6.7+ for iOS (Widgets, Multimedia, Svg), prebuilt MoltenVK for iOS (headers and lib), and proper JIT entitlements (Developer mode) to allow `MAP_JIT`.
+- Status: frontend compiles with Qt for iOS; rendering uses Vulkan via MoltenVK on CAMetalLayer; OpenGL is disabled.
+- Configure environment variables so CMake can find Vulkan for iOS:
+  - `-DVulkan_INCLUDE_DIR=/path/to/MoltenVK/include`
+  - `-DVulkan_LIBRARY=/path/to/MoltenVK/libs/ios/libMoltenVK.dylib` (or `.a` as appropriate)
+  - Ensure `Qt6_DIR` points to your Qt iOS kit.
+- Configure build:
+  - `cmake -B build-ios -G Xcode -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 -DUSE_VULKAN=ON -DUSE_SYSTEM_MVK=ON -DQT_HOST_PATH=/path/to/Qt/6.x/ios`
+- Build and open Xcode project:
+  - `cmake --build build-ios --config Release`
+  - Open `build-ios/rpcs3.xcodeproj` in Xcode, select an iOS device, set signing team, add JIT entitlements, and run.
+
+Notes:
+- JIT: iOS requires special entitlements for runtime code generation. Without them, emulation will not run.
+- Filesystem paths and firmware install UI rely on Qt’s file dialogs; ensure permissions are granted in the app’s entitlements as needed.

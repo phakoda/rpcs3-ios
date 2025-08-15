@@ -108,20 +108,27 @@ add_subdirectory(yaml-cpp)
 # OpenGL
 
 if (NOT ANDROID)
-	find_package(OpenGL REQUIRED OPTIONAL_COMPONENTS EGL)
-
 	add_library(3rdparty_opengl INTERFACE)
-	target_include_directories(3rdparty_opengl INTERFACE GL)
-
-	if (WIN32)
+	if (APPLE)
+		# iOS does not support desktop OpenGL; disable OpenGL on iOS
+		if (DEFINED CMAKE_SYSTEM_NAME AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
+			target_compile_definitions(3rdparty_opengl INTERFACE WITHOUT_OPENGL=1)
+		else()
+			find_package(OpenGL REQUIRED OPTIONAL_COMPONENTS EGL)
+			target_include_directories(3rdparty_opengl INTERFACE GL)
+			target_link_libraries(3rdparty_opengl INTERFACE OpenGL::GL OpenGL::GLU)
+		endif()
+	elseif (WIN32)
+		find_package(OpenGL REQUIRED OPTIONAL_COMPONENTS EGL)
+		target_include_directories(3rdparty_opengl INTERFACE GL)
 		if(NOT MSVC)
 			target_link_libraries(3rdparty_opengl INTERFACE OpenGL::GL OpenGL::GLU)
 		else()
 			target_link_libraries(3rdparty_opengl INTERFACE dxgi.lib d2d1.lib dwrite.lib)
 		endif()
-	elseif(APPLE)
-		target_link_libraries(3rdparty_opengl INTERFACE OpenGL::GL OpenGL::GLU)
 	else()
+		find_package(OpenGL REQUIRED OPTIONAL_COMPONENTS EGL)
+		target_include_directories(3rdparty_opengl INTERFACE GL)
 		target_link_libraries(3rdparty_opengl INTERFACE OpenGL::GL OpenGL::GLU OpenGL::GLX)
 	endif()
 else()
@@ -168,33 +175,54 @@ endif()
 set(VULKAN_TARGET 3rdparty_dummy_lib)
 if(USE_VULKAN)
 	if(APPLE)
-		if(USE_SYSTEM_MVK)
-			message(STATUS "RPCS3: Using system MoltenVK")
+		# For macOS we can build the MoltenVK submodule automatically.
+		# For iOS, you must provide an iOS MoltenVK SDK and set VULKAN_SDK/Vulkan_INCLUDE_DIR/Vulkan_LIBRARY accordingly.
+		if(DEFINED CMAKE_SYSTEM_NAME AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
+			if(USE_SYSTEM_MVK)
+				message(STATUS "RPCS3: Using system MoltenVK (iOS)")
+			else()
+				message(STATUS "RPCS3: iOS build requires prebuilt MoltenVK. Set VULKAN_SDK/Vulkan_INCLUDE_DIR/Vulkan_LIBRARY for iOS.")
+			endif()
 		else()
-			message(STATUS "RPCS3: MoltenVK submodule")
+			if(USE_SYSTEM_MVK)
+				message(STATUS "RPCS3: Using system MoltenVK")
+			else()
+				message(STATUS "RPCS3: MoltenVK submodule")
 
-			execute_process(COMMAND "${CMAKE_COMMAND}" -G "${CMAKE_GENERATOR}" .
-				WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK"
-			)
-			execute_process(COMMAND "${CMAKE_COMMAND}" --build .
-				WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK"
-			)
+				execute_process(COMMAND "${CMAKE_COMMAND}" -G "${CMAKE_GENERATOR}" .
+					WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK"
+				)
+				execute_process(COMMAND "${CMAKE_COMMAND}" --build .
+					WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK"
+				)
 
-			add_library(moltenvk_lib SHARED IMPORTED)
-			add_dependencies(moltenvk_lib moltenvk)
-			set_target_properties(moltenvk_lib
-				PROPERTIES IMPORTED_LOCATION "{Vulkan_LIBRARY}"
-			)
+				add_library(moltenvk_lib SHARED IMPORTED)
+				add_dependencies(moltenvk_lib moltenvk)
+				set_target_properties(moltenvk_lib
+					PROPERTIES IMPORTED_LOCATION "{Vulkan_LIBRARY}"
+				)
 
-			set(VULKAN_SDK "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK/MoltenVK/MoltenVK")
-			set(VK_ICD_FILENAMES "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK/MoltenVK/MoltenVK/icd/MoltenVK_icd.json")
-			set(Vulkan_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK/MoltenVK/MoltenVK/include")
-			set(Vulkan_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK/MoltenVK/Build/Products/Release/dynamic/libMoltenVK.dylib")
-			set(Vulkan_TOOLS "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK/MoltenVK/Build/Products/Release")
+				set(VULKAN_SDK "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK/MoltenVK/MoltenVK")
+				set(VK_ICD_FILENAMES "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK/MoltenVK/MoltenVK/icd/MoltenVK_icd.json")
+				set(Vulkan_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK/MoltenVK/MoltenVK/include")
+				set(Vulkan_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK/MoltenVK/Build/Products/Release/dynamic/libMoltenVK.dylib")
+				set(Vulkan_TOOLS "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK/MoltenVK/Build/Products/Release")
+			endif()
 		endif()
 	endif()
 
 	find_package(Vulkan)
+	# Fallback for iOS builds: allow user-specified MoltenVK include/lib without FindVulkan
+	if(NOT VULKAN_FOUND AND APPLE AND DEFINED CMAKE_SYSTEM_NAME AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
+		if(DEFINED Vulkan_INCLUDE_DIR AND EXISTS "${Vulkan_INCLUDE_DIR}" AND DEFINED Vulkan_LIBRARY AND EXISTS "${Vulkan_LIBRARY}")
+			add_library(Vulkan::Vulkan UNKNOWN IMPORTED)
+			set_target_properties(Vulkan::Vulkan PROPERTIES
+				IMPORTED_LOCATION "${Vulkan_LIBRARY}"
+				INTERFACE_INCLUDE_DIRECTORIES "${Vulkan_INCLUDE_DIR}")
+			set(VULKAN_FOUND TRUE)
+		endif()
+	endif()
+
 	if(VULKAN_FOUND)
 		add_library(3rdparty_vulkan INTERFACE)
 		target_compile_definitions(3rdparty_vulkan INTERFACE -DHAVE_VULKAN)
@@ -212,7 +240,7 @@ if(USE_VULKAN)
 	else()
 		message(WARNING "USE_VULKAN was enabled, but libvulkan was not found. RPCS3 will be compiled without Vulkan support.")
 		if(APPLE)
-			message(FATAL_ERROR "To build without Vulkan support on macOS, please disable USE_VULKAN.")
+			message(FATAL_ERROR "To build without Vulkan support on macOS/iOS, please disable USE_VULKAN.")
 		endif()
 	endif()
 endif()

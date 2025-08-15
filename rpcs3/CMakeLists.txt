@@ -111,12 +111,29 @@ if (NOT ANDROID)
         target_sources(rpcs3 PRIVATE rpcs3.rc)
         target_compile_definitions(rpcs3 PRIVATE UNICODE _UNICODE)
     elseif(APPLE)
-        add_executable(rpcs3 MACOSX_BUNDLE)
-        target_sources(rpcs3 PRIVATE rpcs3.icns update_helper.sh)
-        set_source_files_properties(update_helper.sh PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-        set_target_properties(rpcs3
-            PROPERTIES
-                MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/rpcs3.plist.in")
+        # Differentiate macOS and iOS bundle setup
+        if(DEFINED CMAKE_SYSTEM_NAME AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
+            add_executable(rpcs3 MACOSX_BUNDLE)
+            # Set iOS-specific Info.plist and entitlements
+            set_target_properties(rpcs3
+                PROPERTIES
+                    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/rpcs3_ios.plist.in"
+                    XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_CURRENT_SOURCE_DIR}/rpcs3_ios.entitlements"
+                    XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2")
+            # Link required iOS frameworks
+            target_link_libraries(rpcs3 PRIVATE
+                "-framework UIKit"
+                "-framework Foundation"
+                "-framework Metal"
+                "-framework QuartzCore")
+        else()
+            add_executable(rpcs3 MACOSX_BUNDLE)
+            target_sources(rpcs3 PRIVATE rpcs3.icns update_helper.sh)
+            set_source_files_properties(update_helper.sh PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+            set_target_properties(rpcs3
+                PROPERTIES
+                    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/rpcs3.plist.in")
+        endif()
     else()
         add_executable(rpcs3)
     endif()
@@ -137,17 +154,22 @@ if (NOT ANDROID)
 
     # Copy icons to executable directory
     if(APPLE)
-        if (CMAKE_BUILD_TYPE MATCHES "Debug" OR CMAKE_BUILD_TYPE MATCHES "RelWithDebInfo")
-            set(QT_DEPLOY_FLAGS "-no-strip")
+        if(DEFINED CMAKE_SYSTEM_NAME AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
+            qt_finalize_target(rpcs3)
+            # iOS packaging handled by Xcode/Qt; no macOS-specific resource copying
         else()
-            set(QT_DEPLOY_FLAGS "")
+            if (CMAKE_BUILD_TYPE MATCHES "Debug" OR CMAKE_BUILD_TYPE MATCHES "RelWithDebInfo")
+                set(QT_DEPLOY_FLAGS "-no-strip")
+            else()
+                set(QT_DEPLOY_FLAGS "")
+            endif()
+            qt_finalize_target(rpcs3)
+            add_custom_command(TARGET rpcs3 POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/rpcs3.icns $<TARGET_FILE_DIR:rpcs3>/../Resources/rpcs3.icns
+                COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bin/Icons $<TARGET_FILE_DIR:rpcs3>/../Resources/Icons
+                COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bin/GuiConfigs $<TARGET_FILE_DIR:rpcs3>/../Resources/GuiConfigs
+                COMMAND "${MACDEPLOYQT_EXECUTABLE}" "${PROJECT_BINARY_DIR}/bin/rpcs3.app" "${QT_DEPLOY_FLAGS}")
         endif()
-        qt_finalize_target(rpcs3)
-        add_custom_command(TARGET rpcs3 POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/rpcs3.icns $<TARGET_FILE_DIR:rpcs3>/../Resources/rpcs3.icns
-            COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bin/Icons $<TARGET_FILE_DIR:rpcs3>/../Resources/Icons
-            COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bin/GuiConfigs $<TARGET_FILE_DIR:rpcs3>/../Resources/GuiConfigs
-            COMMAND "${MACDEPLOYQT_EXECUTABLE}" "${PROJECT_BINARY_DIR}/bin/rpcs3.app" "${QT_DEPLOY_FLAGS}")
     elseif(UNIX)
         add_custom_command(TARGET rpcs3 POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bin/Icons $<TARGET_FILE_DIR:rpcs3>/Icons

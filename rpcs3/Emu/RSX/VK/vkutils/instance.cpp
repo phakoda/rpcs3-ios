@@ -1,6 +1,10 @@
 #include "stdafx.h"
 #include "instance.h"
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 namespace vk
 {
 	// Supported extensions
@@ -154,7 +158,11 @@ namespace vk
 #ifdef _WIN32
 			extensions.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 #elif defined(__APPLE__)
-			extensions.push_back(VK_MVK_MACOS_SURFACE_EXTENSION_NAME);
+			#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+				extensions.push_back(VK_MVK_IOS_SURFACE_EXTENSION_NAME);
+			#else
+				extensions.push_back(VK_MVK_MACOS_SURFACE_EXTENSION_NAME);
+			#endif
 #else
 			bool found_surface_ext = false;
 #ifdef HAVE_X11
@@ -279,85 +287,82 @@ namespace vk
 
 		for (u32 i = 0; i < device_queues; ++i)
 		{
-			// 1. Test for a present queue possibly one that also supports present
-			if (present_queue_idx == umax && supports_present[i])
+			bool present_support_possible = supports_present[i] != VK_FALSE;
+			present_possible &= present_support_possible;
+
+			if (test_queue_family(i, VK_QUEUE_GRAPHICS_BIT))
 			{
-				present_queue_idx = i;
-				if (test_queue_family(i, VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT))
+				if (graphics_queue_idx == umax)
 				{
 					graphics_queue_idx = i;
 				}
-			}
-			// 2. Check for graphics support
-			else if (graphics_queue_idx == umax && test_queue_family(i, VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT))
-			{
-				graphics_queue_idx = i;
-				if (supports_present[i])
+				else if (transfer_queue_idx == umax)
 				{
-					present_queue_idx = i;
+					transfer_queue_idx = i; // fallback
 				}
 			}
-			// 3. Check if transfer + compute is available
-			else if (transfer_queue_idx == umax && test_queue_family(i, VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT))
+
+			if (test_queue_family(i, VK_QUEUE_TRANSFER_BIT))
 			{
-				transfer_queue_idx = i;
+				if (transfer_queue_idx == umax)
+				{
+					transfer_queue_idx = i;
+				}
+			}
+
+			if (present_support_possible)
+			{
+				present_queue_idx = i;
 			}
 		}
 
-		if (graphics_queue_idx == umax)
+		VkFormat format = VK_FORMAT_B8G8R8A8_UNORM;
+		VkColorSpaceKHR color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+
+		if (present_possible)
 		{
-			rsx_log.fatal("Failed to find a suitable graphics queue");
-			return nullptr;
+			VkSurfaceCapabilitiesKHR capabilities = {};
+			vkGetPhysicalDeviceSurfaceCapabilitiesKHR(dev, m_surface, &capabilities);
+
+			VkBool32 format_supported = false;
+			u32 num_formats;
+			vkGetPhysicalDeviceSurfaceFormatsKHR(dev, m_surface, &num_formats, nullptr);
+			std::vector<VkSurfaceFormatKHR> formats(num_formats);
+			vkGetPhysicalDeviceSurfaceFormatsKHR(dev, m_surface, &num_formats, formats.data());
+
+			for (const auto &f : formats)
+			{
+				if (f.format == VK_FORMAT_B8G8R8A8_UNORM && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+				{
+					format_supported = true;
+					break;
+				}
+			}
+
+			if (!format_supported && !formats.empty())
+			{
+				format = formats[0].format;
+				color_space = formats[0].colorSpace;
+			}
 		}
 
-		if (graphics_queue_idx != present_queue_idx)
+		if (present_queue_idx == umax)
 		{
-			// Separate graphics and present, use headless fallback
 			present_possible = false;
 		}
 
 		if (!present_possible)
 		{
-			//Native(sw) swapchain
-			rsx_log.error("It is not possible for the currently selected GPU to present to the window (Likely caused by NVIDIA driver running the current display)");
-			rsx_log.warning("Falling back to software present support (native windowing API)");
-			auto swapchain = new swapchain_NATIVE(dev, -1, graphics_queue_idx, transfer_queue_idx);
-			swapchain->create(window_handle);
-			return swapchain;
+			present_queue_idx = VK_QUEUE_FAMILY_IGNORED;
 		}
 
-		// Get the list of VkFormat's that are supported:
-		u32 formatCount;
-		CHECK_RESULT(vkGetPhysicalDeviceSurfaceFormatsKHR(dev, m_surface, &formatCount, nullptr));
+		dev.create(m_instance, graphics_queue_idx, present_queue_idx, transfer_queue_idx);
 
-		std::vector<VkSurfaceFormatKHR> surfFormats(formatCount);
-		CHECK_RESULT(vkGetPhysicalDeviceSurfaceFormatsKHR(dev, m_surface, &formatCount, surfFormats.data()));
-
-		VkFormat format;
-		VkColorSpaceKHR color_space;
-
-		if (formatCount == 1 && surfFormats[0].format == VK_FORMAT_UNDEFINED)
+		if (present_possible)
 		{
-			format = VK_FORMAT_B8G8R8A8_UNORM;
-		}
-		else
-		{
-			if (!formatCount) fmt::throw_exception("Format count is zero!");
-			format = surfFormats[0].format;
-
-			//Prefer BGRA8_UNORM to avoid sRGB compression (RADV)
-			for (auto& surface_format : surfFormats)
-			{
-				if (surface_format.format == VK_FORMAT_B8G8R8A8_UNORM)
-				{
-					format = VK_FORMAT_B8G8R8A8_UNORM;
-					break;
-				}
-			}
+			return new swapchain_WSI(dev, present_queue_idx, graphics_queue_idx, transfer_queue_idx, format, m_surface, color_space, !surface_config.supports_automatic_wm_reports);
 		}
 
-		color_space = surfFormats[0].colorSpace;
-
-		return new swapchain_WSI(dev, present_queue_idx, graphics_queue_idx, transfer_queue_idx, format, m_surface, color_space, !surface_config.supports_automatic_wm_reports);
+		return new swapchain_NATIVE(dev, present_queue_idx, graphics_queue_idx, transfer_queue_idx, format);
 	}
 }

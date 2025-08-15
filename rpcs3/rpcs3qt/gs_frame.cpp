@@ -34,7 +34,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #elif defined(__APPLE__)
-//nothing
+#include <TargetConditionals.h>
 #else
 #ifdef HAVE_WAYLAND
 #include <QGuiApplication>
@@ -668,7 +668,11 @@ display_handle_t gs_frame::handle() const
 #ifdef _WIN32
 	return reinterpret_cast<HWND>(this->winId());
 #elif defined(__APPLE__)
-	return reinterpret_cast<void*>(this->winId()); //NSView
+	#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+		return reinterpret_cast<void*>(this->winId()); // UIView*
+	#else
+		return reinterpret_cast<void*>(this->winId()); // NSView*
+	#endif
 #else
 #ifdef HAVE_WAYLAND
 	QPlatformNativeInterface *native = QGuiApplication::platformNativeInterface();

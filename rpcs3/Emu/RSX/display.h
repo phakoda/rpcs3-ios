@@ -18,7 +18,12 @@ using Window  = unsigned long;
 #ifdef _WIN32
 using display_handle_t = HWND;
 #elif defined(__APPLE__)
-using display_handle_t = void*; // NSView
+#include <TargetConditionals.h>
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+using display_handle_t = void*; // UIView*
+#else
+using display_handle_t = void*; // NSView*
+#endif
 #else
 #include <variant>
 using display_handle_t = std::variant<
