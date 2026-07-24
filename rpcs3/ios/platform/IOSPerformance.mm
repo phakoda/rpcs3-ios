@@ -70,33 +70,37 @@ void start_memory_pressure_source()
         return;
     }
 
-    g_memory_pressure_source = dispatch_source_create(
+    dispatch_source_t source = dispatch_source_create(
         DISPATCH_SOURCE_TYPE_MEMORYPRESSURE,
         0,
         DISPATCH_MEMORYPRESSURE_NORMAL | DISPATCH_MEMORYPRESSURE_WARN | DISPATCH_MEMORYPRESSURE_CRITICAL,
         dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
-    if (!g_memory_pressure_source)
+    if (!source)
     {
         return;
     }
 
-    dispatch_source_set_event_handler(g_memory_pressure_source, ^{
-        const auto pressure = pressure_from_flags(dispatch_source_get_data(g_memory_pressure_source));
+    dispatch_source_set_event_handler(source, ^{
+        const auto pressure = pressure_from_flags(dispatch_source_get_data(source));
         g_memory_pressure.store(pressure);
         deliver_performance_event(rpcs3::ios::performance_event::memory_pressure_changed);
     });
-    dispatch_resume(g_memory_pressure_source);
+    dispatch_source_set_cancel_handler(source, ^{
+        g_memory_pressure.store(rpcs3::ios::memory_pressure_level::normal);
+    });
+
+    g_memory_pressure_source = source;
+    dispatch_resume(source);
 }
 
 void stop_memory_pressure_source()
 {
-    if (!g_memory_pressure_source)
-    {
-        return;
-    }
-    dispatch_source_cancel(g_memory_pressure_source);
+    dispatch_source_t source = g_memory_pressure_source;
     g_memory_pressure_source = nil;
-    g_memory_pressure.store(rpcs3::ios::memory_pressure_level::normal);
+    if (source)
+    {
+        dispatch_source_cancel(source);
+    }
 }
 }
 
