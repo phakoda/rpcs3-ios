@@ -107,7 +107,7 @@ if(TARGET rpcs3_ui)
 
     set(_frontend_include_anchor "#include \"Emu/savestate_utils.hpp\"")
     set(_frontend_include_replacement "#include \"Emu/savestate_utils.hpp\"\n#include \"ios/IOSRuntimeIntegration.h\"")
-    string(REPLACE "${_frontend_include_anchor}" "${_frontend_replacement}" _frontend_contents "${_frontend_contents}")
+    string(REPLACE "${_frontend_include_anchor}" "${_frontend_include_replacement}" _frontend_contents "${_frontend_contents}")
 
     set(_frontend_init_anchor "\tapp->setOrganizationName(\"RPCS3\");")
     set(_frontend_init_replacement "\tapp->setOrganizationName(\"RPCS3\");\n\trpcs3::ios::initialize_rpcs3_runtime();")
