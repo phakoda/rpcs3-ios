@@ -5,6 +5,10 @@
 
 #include <unistd.h>
 
+#include <algorithm>
+#include <cmath>
+#include <memory>
+
 namespace
 {
 NSString* bundle_identifier()
@@ -22,17 +26,21 @@ NSURL* provider_url(rpcs3::ios::jit_provider provider)
     case rpcs3::ios::jit_provider::apple_magnifier:
         return [NSURL URLWithString:[NSString stringWithFormat:@"apple-magnifier://enable-jit?bundle-id=%@", identifier]];
     case rpcs3::ios::jit_provider::stikjit:
-        return [NSURL URLWithString:[NSString stringWithFormat:@"stikjit://enable-jit?pid=%d&bundle-id=%@", pid, identifier]];
+        return [NSURL URLWithString:@"stikjit://enable-jit"];
     case rpcs3::ios::jit_provider::jitstreamer:
         return [NSURL URLWithString:[NSString stringWithFormat:@"http://[fd00::]:9172/attach/%d", pid]];
     }
     return nil;
 }
 
-std::string utf8(NSString* value)
+bool jit_is_effectively_enabled(const rpcs3::ios::jit_capabilities& capabilities)
 {
-    const char* text = value.UTF8String;
-    return text ? std::string(text) : std::string{};
+    return capabilities.map_jit_available &&
+        capabilities.map_jit_allocation_succeeded &&
+        (capabilities.dynamic_codesigning_entitlement ||
+         capabilities.allow_jit_entitlement ||
+         capabilities.debugger_entitlement ||
+         capabilities.process_is_debugged);
 }
 }
 
@@ -142,5 +150,39 @@ bool request_jit(jit_provider provider, std::string* error)
         *error = "The selected external JIT provider is not installed or its URL scheme is unavailable.";
     }
     return opened;
+}
+
+void wait_for_jit_enablement(double timeout_seconds, jit_enablement_callback callback)
+{
+    if (!callback)
+    {
+        return;
+    }
+
+    timeout_seconds = std::clamp(timeout_seconds, 1.0, 120.0);
+    const unsigned int poll_count = static_cast<unsigned int>(std::ceil(timeout_seconds * 4.0));
+    auto callback_holder = std::make_shared<jit_enablement_callback>(std::move(callback));
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        jit_capabilities capabilities;
+        for (unsigned int attempt = 0; attempt < poll_count; ++attempt)
+        {
+            capabilities = query_extended_jit_capabilities();
+            if (jit_is_effectively_enabled(capabilities))
+            {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    (*callback_holder)(true, capabilities, "Executable-memory capability was detected.");
+                });
+                return;
+            }
+            usleep(250000);
+        }
+
+        capabilities = query_extended_jit_capabilities();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            (*callback_holder)(false, capabilities,
+                "Timed out waiting for an external debugger or JIT entitlement. The provider may not have attached.");
+        });
+    });
 }
 }
