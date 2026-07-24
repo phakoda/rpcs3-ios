@@ -87,9 +87,9 @@ NSString* run_vulkan_probe(CAMetalLayer* layer)
     VkApplicationInfo application_info{};
     application_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     application_info.pApplicationName = "RPCS3 iOS bring-up";
-    application_info.applicationVersion = VK_MAKE_API_VERSION(0, 0, 2, 0);
+    application_info.applicationVersion = VK_MAKE_API_VERSION(0, 0, 3, 0);
     application_info.pEngineName = "RPCS3";
-    application_info.engineVersion = VK_MAKE_API_VERSION(0, 0, 2, 0);
+    application_info.engineVersion = VK_MAKE_API_VERSION(0, 0, 3, 0);
     application_info.apiVersion = VK_API_VERSION_1_2;
 
     VkInstanceCreateInfo instance_info{};
@@ -199,6 +199,7 @@ NSString* controller_summary()
     UILabel* _graphics_status;
     UILabel* _platform_status;
     UILabel* _controller_status;
+    UILabel* _jit_probe_status;
     UILabel* _import_status;
     RPCS3MetalView* _metal_view;
 }
@@ -213,13 +214,15 @@ NSString* controller_summary()
     return label;
 }
 
-- (UIButton*)makeButton:(NSString*)title action:(SEL)action
+- (UIButton*)makeButton:(NSString*)title action:(SEL)action prominent:(bool)prominent
 {
     UIButton* button = [UIButton buttonWithType:UIButtonTypeSystem];
     button.translatesAutoresizingMaskIntoConstraints = NO;
     [button setTitle:title forState:UIControlStateNormal];
     button.titleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
-    button.configuration = [UIButtonConfiguration borderedProminentButtonConfiguration];
+    button.configuration = prominent
+        ? [UIButtonConfiguration borderedProminentButtonConfiguration]
+        : [UIButtonConfiguration borderedButtonConfiguration];
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
 }
@@ -245,18 +248,24 @@ NSString* controller_summary()
 
     _platform_status = [self makeStatusLabel];
     _controller_status = [self makeStatusLabel];
+
+    _jit_probe_status = [self makeStatusLabel];
+    _jit_probe_status.textColor = UIColor.secondaryLabelColor;
+    _jit_probe_status.text = @"Executable JIT probe has not been run.";
+
     _import_status = [self makeStatusLabel];
     _import_status.textColor = UIColor.secondaryLabelColor;
     _import_status.text = @"Imported files are copied into Documents/Imports.";
 
-    UIButton* import_files = [self makeButton:@"Import Files" action:@selector(importFiles:)];
-    UIButton* import_folder = [self makeButton:@"Import Folder" action:@selector(importFolder:)];
+    UIButton* run_jit_probe = [self makeButton:@"Run JIT Probe" action:@selector(runJITProbe:) prominent:false];
+    UIButton* import_files = [self makeButton:@"Import Files" action:@selector(importFiles:) prominent:true];
+    UIButton* import_folder = [self makeButton:@"Import Folder" action:@selector(importFolder:) prominent:true];
 
-    UIStackView* button_stack = [[UIStackView alloc] initWithArrangedSubviews:@[import_files, import_folder]];
-    button_stack.translatesAutoresizingMaskIntoConstraints = NO;
-    button_stack.axis = UILayoutConstraintAxisHorizontal;
-    button_stack.spacing = 12.0;
-    button_stack.distribution = UIStackViewDistributionFillEqually;
+    UIStackView* import_button_stack = [[UIStackView alloc] initWithArrangedSubviews:@[import_files, import_folder]];
+    import_button_stack.translatesAutoresizingMaskIntoConstraints = NO;
+    import_button_stack.axis = UILayoutConstraintAxisHorizontal;
+    import_button_stack.spacing = 12.0;
+    import_button_stack.distribution = UIStackViewDistributionFillEqually;
 
     UIStackView* stack = [[UIStackView alloc] initWithArrangedSubviews:@[
         title_label,
@@ -264,12 +273,14 @@ NSString* controller_summary()
         _graphics_status,
         _platform_status,
         _controller_status,
-        button_stack,
+        run_jit_probe,
+        _jit_probe_status,
+        import_button_stack,
         _import_status,
     ]];
     stack.translatesAutoresizingMaskIntoConstraints = NO;
     stack.axis = UILayoutConstraintAxisVertical;
-    stack.spacing = 18.0;
+    stack.spacing = 14.0;
     stack.alignment = UIStackViewAlignmentFill;
 
     _metal_view = [[RPCS3MetalView alloc] init];
@@ -329,6 +340,21 @@ NSString* controller_summary()
 {
     (void)notification;
     [self refreshControllerStatus];
+}
+
+- (void)runJITProbe:(UIButton*)sender
+{
+    sender.enabled = NO;
+    _jit_probe_status.text = @"Running executable-memory probe…";
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        const rpcs3::ios::jit_probe_result result = rpcs3::ios::run_jit_execution_probe();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            sender.enabled = YES;
+            self->_jit_probe_status.text = [NSString stringWithFormat:@"JIT probe: %@",
+                ns_string(result.detail)];
+            [self refreshPlatformStatus];
+        });
+    });
 }
 
 - (void)importFiles:(UIButton*)sender
