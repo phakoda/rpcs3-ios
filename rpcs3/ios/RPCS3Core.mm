@@ -2,6 +2,7 @@
 #include "IOSCoreDefaults.h"
 #include "IOSCoreEmulator.h"
 #include "IOSCoreGSFrame.h"
+#include "IOSCoreLifecycle.h"
 #include "platform/IOSPlatform.h"
 
 #include <algorithm>
@@ -73,12 +74,12 @@ bool renderer_mutation_allowed()
 rpcs3_ios_core_result fail_initialization(std::string error)
 {
     clear_pending_import();
+    rpcs3::ios::remove_core_lifecycle_callbacks();
     rpcs3::ios::shutdown_core_emulator();
     rpcs3::ios::clear_core_render_view();
     rpcs3::ios::stop_all_controller_haptics();
     rpcs3::ios::set_external_display_callback({});
     rpcs3::ios::set_performance_callback({});
-    rpcs3::ios::set_lifecycle_callbacks({});
     rpcs3::ios::shutdown();
     rpcs3::ios::set_core_last_error(std::move(error));
     return RPCS3_IOS_CORE_PLATFORM_ERROR;
@@ -122,6 +123,7 @@ rpcs3_ios_core_result rpcs3_ios_core_initialize(void)
             : std::move(error));
     }
 
+    rpcs3::ios::install_core_lifecycle_callbacks();
     clear_pending_import();
     rpcs3::ios::set_core_last_error({});
     g_initialized.store(true);
@@ -136,14 +138,14 @@ rpcs3_ios_core_result rpcs3_ios_core_shutdown(void)
         return RPCS3_IOS_CORE_NOT_INITIALIZED;
     }
 
-    // Stop guest and renderer threads before releasing their retained UIView,
-    // controller overlay, audio, display, and notification services.
+    // Stop lifecycle delivery and guest/renderer threads before releasing their
+    // retained UIView, controller overlay, audio, display, and notifications.
+    rpcs3::ios::remove_core_lifecycle_callbacks();
     rpcs3::ios::shutdown_core_emulator();
     rpcs3::ios::clear_core_render_view();
     rpcs3::ios::stop_all_controller_haptics();
     rpcs3::ios::set_external_display_callback({});
     rpcs3::ios::set_performance_callback({});
-    rpcs3::ios::set_lifecycle_callbacks({});
     rpcs3::ios::shutdown();
     clear_pending_import();
     g_initialized.store(false);
