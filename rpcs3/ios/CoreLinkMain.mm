@@ -1,8 +1,10 @@
+#import <QuartzCore/CAMetalLayer.h>
 #import <UIKit/UIKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include "RPCS3Core.h"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -62,6 +64,44 @@ NSString* event_name(rpcs3_ios_core_event event)
 }
 }
 
+@interface RPCS3CoreMetalView : UIView
+@end
+
+@implementation RPCS3CoreMetalView
++ (Class)layerClass
+{
+    return CAMetalLayer.class;
+}
+
+- (instancetype)init
+{
+    self = [super init];
+    if (!self)
+    {
+        return nil;
+    }
+
+    self.backgroundColor = UIColor.blackColor;
+    self.clipsToBounds = YES;
+    CAMetalLayer* layer = (CAMetalLayer*)self.layer;
+    layer.framebufferOnly = NO;
+    layer.opaque = YES;
+    return self;
+}
+
+- (void)layoutSubviews
+{
+    [super layoutSubviews];
+    CAMetalLayer* layer = (CAMetalLayer*)self.layer;
+    UIScreen* screen = self.window.screen ?: UIScreen.mainScreen;
+    const CGFloat scale = screen.nativeScale;
+    layer.contentsScale = scale;
+    layer.drawableSize = CGSizeMake(
+        std::max<CGFloat>(self.bounds.size.width * scale, 1.0),
+        std::max<CGFloat>(self.bounds.size.height * scale, 1.0));
+}
+@end
+
 @class RPCS3CoreLinkViewController;
 
 static void core_event_callback(rpcs3_ios_core_event event, const char* detail, void* context)
@@ -82,6 +122,7 @@ static void core_event_callback(rpcs3_ios_core_event event, const char* detail, 
 
 @implementation RPCS3CoreLinkViewController
 {
+    RPCS3CoreMetalView* _metal_view;
     UILabel* _status;
     UILabel* _event_status;
     UIButton* _import_button;
@@ -119,7 +160,11 @@ static void core_event_callback(rpcs3_ios_core_event event, const char* detail, 
     explanation.textAlignment = NSTextAlignmentCenter;
     explanation.numberOfLines = 0;
     explanation.textColor = UIColor.secondaryLabelColor;
-    explanation.text = @"This host imports only RPCS3Core's public C module. It can initialize the real emulator, import local content, and drive a headless boot. RSX output remains Null until a native renderer host is connected.";
+    explanation.text = @"This host imports only RPCS3Core's public C module. It initializes the emulator, supplies a CAMetalLayer for Vulkan/MoltenVK, imports legal local content, and drives boot/lifecycle operations. Runtime compatibility remains unproven until built and exercised on Apple hardware.";
+
+    _metal_view = [[RPCS3CoreMetalView alloc] init];
+    _metal_view.translatesAutoresizingMaskIntoConstraints = NO;
+    _metal_view.layer.cornerRadius = 10.0;
 
     _status = [[UILabel alloc] init];
     _status.translatesAutoresizingMaskIntoConstraints = NO;
@@ -148,6 +193,7 @@ static void core_event_callback(rpcs3_ios_core_event event, const char* detail, 
     UIStackView* stack = [[UIStackView alloc] initWithArrangedSubviews:@[
         title,
         explanation,
+        _metal_view,
         _status,
         _import_button,
         control_row,
@@ -174,7 +220,15 @@ static void core_event_callback(rpcs3_ios_core_event event, const char* detail, 
         [stack.topAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.topAnchor constant:24.0],
         [stack.bottomAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.bottomAnchor constant:-24.0],
         [stack.widthAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.widthAnchor constant:-48.0],
+        [_metal_view.heightAnchor constraintEqualToAnchor:_metal_view.widthAnchor multiplier:9.0 / 16.0],
     ]];
+
+    const rpcs3_ios_core_result render_result = rpcs3_ios_core_set_render_view((__bridge void*)_metal_view);
+    if (render_result != RPCS3_IOS_CORE_SUCCESS)
+    {
+        _event_status.text = [NSString stringWithFormat:@"Render host failed: %@",
+            ns_string(copy_core_string(rpcs3_ios_core_copy_last_error))];
+    }
 
     rpcs3_ios_core_set_event_callback(core_event_callback, (__bridge void*)self);
     [self refreshStatus];
@@ -197,6 +251,7 @@ static void core_event_callback(rpcs3_ios_core_event event, const char* detail, 
     _status.text = [NSString stringWithFormat:
         @"Initialized: %@\n"
          "State: %@\n"
+         "Vulkan host: %@\n"
          "Title: %@\n"
          "Title ID: %@\n"
          "Boot path: %@\n"
@@ -205,6 +260,7 @@ static void core_event_callback(rpcs3_ios_core_event event, const char* detail, 
          "MAP_JIT allocation: %@",
         rpcs3_ios_core_is_initialized() ? @"yes" : @"no",
         state_name(state),
+        rpcs3_ios_core_has_render_view() ? @"attached" : @"headless",
         title.empty() ? @"—" : ns_string(title),
         title_id.empty() ? @"—" : ns_string(title_id),
         boot_path.empty() ? @"—" : ns_string(boot_path),
@@ -215,6 +271,7 @@ static void core_event_callback(rpcs3_ios_core_event event, const char* detail, 
     _pause_button.enabled = state == RPCS3_IOS_EMULATOR_RUNNING;
     _resume_button.enabled = state == RPCS3_IOS_EMULATOR_PAUSED;
     _stop_button.enabled = state != RPCS3_IOS_EMULATOR_STOPPED && state != RPCS3_IOS_EMULATOR_UNAVAILABLE;
+    _import_button.enabled = state == RPCS3_IOS_EMULATOR_STOPPED;
 }
 
 - (void)handleCoreEvent:(NSDictionary*)payload
