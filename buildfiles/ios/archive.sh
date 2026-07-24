@@ -16,7 +16,8 @@ Optional environment:
 
 Without DEVELOPMENT_TEAM the script produces an unsigned archive and an
 unsigned IPA-shaped ZIP for inspection or supported alternative signing tools.
-The core mode packages the whole-archive final-link harness, not the Qt app.
+Core mode archives the public-C-API consumer app and extracts its embedded
+RPCS3Core.framework as a separate device framework artifact.
 EOF
 }
 
@@ -71,7 +72,8 @@ fi
 mkdir -p "${output_dir}"
 archive_path="${output_dir}/${product_label}.xcarchive"
 ipa_path="${output_dir}/${product_label}.ipa"
-rm -rf "${archive_path}" "${ipa_path}" "${output_dir}/Payload"
+core_framework_path="${output_dir}/RPCS3Core-device.framework"
+rm -rf "${archive_path}" "${ipa_path}" "${core_framework_path}" "${output_dir}/Payload"
 
 xcode_args=(
     -project "${project}"
@@ -108,6 +110,19 @@ if [[ -z "${app_path}" || ! -d "${app_path}" ]]; then
     exit 1
 fi
 
+if [[ "${mode}" == "core" ]]; then
+    embedded_framework="${app_path}/Frameworks/RPCS3Core.framework"
+    if [[ ! -d "${embedded_framework}" ]]; then
+        echo "error: core archive did not contain the embedded RPCS3Core.framework" >&2
+        exit 1
+    fi
+    ditto "${embedded_framework}" "${core_framework_path}"
+    if [[ ! -f "${core_framework_path}/Headers/RPCS3Core.h" ]]; then
+        echo "error: extracted core framework is missing RPCS3Core.h" >&2
+        exit 1
+    fi
+fi
+
 if [[ "${ARCHIVE_ONLY:-0}" != "1" ]]; then
     mkdir -p "${output_dir}/Payload"
     ditto "${app_path}" "${output_dir}/Payload/$(basename "${app_path}")"
@@ -121,6 +136,12 @@ cat <<EOF
 Archive created:
   ${archive_path}
 EOF
+if [[ "${mode}" == "core" ]]; then
+    cat <<EOF
+Device core framework extracted:
+  ${core_framework_path}
+EOF
+fi
 if [[ "${ARCHIVE_ONLY:-0}" != "1" ]]; then
     cat <<EOF
 IPA package created:
