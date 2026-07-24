@@ -37,7 +37,7 @@ rpcs3_ios_add_subdirectory(asmjit)
 rpcs3_ios_add_subdirectory(llvm)
 rpcs3_ios_add_subdirectory(wolfssl)
 rpcs3_ios_add_subdirectory(curl)
-rpcs3_ios_add_subdirectory(miniupnp)
+rpcs3_ios_add_subdirectory(miniupnpc)
 rpcs3_ios_add_subdirectory(fusion)
 rpcs3_ios_add_subdirectory(feralinteractive)
 
@@ -76,7 +76,6 @@ add_library(3rdparty_glew INTERFACE)
 # FFmpeg must be cross-built for the selected SDK. Expected layout:
 #   <root>/include/libavcodec/avcodec.h
 #   <root>/lib/libavcodec.a (and companion libraries)
-set(RPCS3_IOS_FFMPEG_ROOT "" CACHE PATH "Root of a static FFmpeg build for iOS")
 if(NOT EXISTS "${RPCS3_IOS_FFMPEG_ROOT}/include/libavcodec/avcodec.h")
     message(FATAL_ERROR
         "Full iOS builds require RPCS3_IOS_FFMPEG_ROOT with FFmpeg headers and static libraries")
@@ -94,8 +93,23 @@ find_library(RPCS3_IOS_COREMEDIA CoreMedia REQUIRED)
 find_library(RPCS3_IOS_COREVIDEO CoreVideo REQUIRED)
 find_library(RPCS3_IOS_VIDEOTOOLBOX VideoToolbox REQUIRED)
 find_library(RPCS3_IOS_SECURITY Security REQUIRED)
-find_library(RPCS3_IOS_BZ2 bz2 REQUIRED)
 find_library(RPCS3_IOS_ICONV iconv REQUIRED)
+find_library(RPCS3_IOS_BZ2 bz2)
+
+set(_rpcs3_ios_ffmpeg_platform_libraries
+    "${RPCS3_IOS_AUDIOTOOLBOX}"
+    "${RPCS3_IOS_COREMEDIA}"
+    "${RPCS3_IOS_COREVIDEO}"
+    "${RPCS3_IOS_VIDEOTOOLBOX}"
+    "${RPCS3_IOS_SECURITY}"
+    "${RPCS3_IOS_ICONV}"
+    3rdparty_zlib)
+if(RPCS3_IOS_BZ2)
+    list(APPEND _rpcs3_ios_ffmpeg_platform_libraries "${RPCS3_IOS_BZ2}")
+endif()
+if(RPCS3_IOS_FFMPEG_EXTRA_LIBRARIES)
+    list(APPEND _rpcs3_ios_ffmpeg_platform_libraries ${RPCS3_IOS_FFMPEG_EXTRA_LIBRARIES})
+endif()
 
 add_library(3rdparty_ffmpeg INTERFACE)
 target_include_directories(3rdparty_ffmpeg SYSTEM INTERFACE "${RPCS3_IOS_FFMPEG_ROOT}/include")
@@ -105,13 +119,7 @@ target_link_libraries(3rdparty_ffmpeg INTERFACE
     "${RPCS3_IOS_AVUTIL}"
     "${RPCS3_IOS_SWSCALE}"
     "${RPCS3_IOS_SWRESAMPLE}"
-    "${RPCS3_IOS_AUDIOTOOLBOX}"
-    "${RPCS3_IOS_COREMEDIA}"
-    "${RPCS3_IOS_COREVIDEO}"
-    "${RPCS3_IOS_VIDEOTOOLBOX}"
-    "${RPCS3_IOS_SECURITY}"
-    "${RPCS3_IOS_BZ2}"
-    "${RPCS3_IOS_ICONV}")
+    ${_rpcs3_ios_ffmpeg_platform_libraries})
 
 # Unsupported desktop/peripheral integrations. Keeping these as interface
 # targets lets the core compile its feature-disabled paths without pulling in
