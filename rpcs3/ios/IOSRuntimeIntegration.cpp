@@ -109,6 +109,19 @@ const char* thermal_state_name(rpcs3::ios::thermal_state state)
     return "unknown";
 }
 
+const char* pressure_state_name(rpcs3::ios::memory_pressure_level state)
+{
+    using rpcs3::ios::memory_pressure_level;
+    switch (state)
+    {
+    case memory_pressure_level::normal: return "normal";
+    case memory_pressure_level::warning: return "warning";
+    case memory_pressure_level::critical: return "critical";
+    case memory_pressure_level::unknown: return "unknown";
+    }
+    return "unknown";
+}
+
 void log_performance_event(rpcs3::ios::performance_event event, rpcs3::ios::performance_state state)
 {
     using rpcs3::ios::performance_event;
@@ -128,9 +141,32 @@ void log_performance_event(rpcs3::ios::performance_event event, rpcs3::ios::perf
         ios_log.notice("Low Power Mode is now %s.", state.low_power_mode ? "enabled" : "disabled");
         break;
     case performance_event::memory_warning:
-        ios_log.error("iOS issued a memory warning. Current caches and savestate operations should minimize peak memory use.");
+        ios_log.error("iOS issued a memory warning; available memory is %llu bytes.", state.available_memory);
+        break;
+    case performance_event::memory_pressure_changed:
+        if (state.memory_pressure == rpcs3::ios::memory_pressure_level::critical)
+        {
+            ios_log.error("Memory pressure is critical; available memory is %llu bytes.", state.available_memory);
+        }
+        else
+        {
+            ios_log.warning("Memory pressure changed to %s; available memory is %llu bytes.",
+                pressure_state_name(state.memory_pressure), state.available_memory);
+        }
         break;
     }
+}
+
+void log_external_display_state(rpcs3::ios::external_display_state state)
+{
+    if (!state.connected)
+    {
+        ios_log.notice("External display disconnected.");
+        return;
+    }
+
+    ios_log.notice("External display connected: %ux%u, scale %.2f, maximum %.0f Hz.",
+        state.width, state.height, state.scale, state.maximum_frames_per_second);
 }
 
 void refresh_touch_controller_visibility()
@@ -152,6 +188,7 @@ void initialize_rpcs3_runtime()
         return;
     }
 
+    configure_moltenvk({});
     initialize();
     set_lifecycle_callbacks({
         .will_resign_active = [] { pause_for_ios_reason(ios_pause_inactive); },
@@ -170,6 +207,7 @@ void initialize_rpcs3_runtime()
     });
 
     set_performance_callback(log_performance_event);
+    set_external_display_callback(log_external_display_state);
     set_idle_timer_disabled(true);
     refresh_touch_controller_visibility();
 
@@ -190,13 +228,15 @@ void initialize_rpcs3_runtime()
     }
 
     const runtime_paths paths = get_runtime_paths();
-    const jit_capabilities jit = query_jit_capabilities();
+    const jit_capabilities jit = query_extended_jit_capabilities();
     const performance_state performance = get_performance_state();
     ios_log.notice("Application support directory: %s", paths.application_support);
     ios_log.notice("Content import directory: %s", paths.imports);
     ios_log.notice("JIT capabilities: %s", jit.detail);
-    ios_log.notice("Physical memory: %llu bytes; thermal state: %s; Low Power Mode: %s",
+    ios_log.notice("Physical memory: %llu bytes; available: %llu bytes; pressure: %s; thermal: %s; Low Power Mode: %s",
         performance.physical_memory,
+        performance.available_memory,
+        pressure_state_name(performance.memory_pressure),
         thermal_state_name(performance.thermal),
         performance.low_power_mode ? "enabled" : "disabled");
 }
@@ -214,9 +254,11 @@ void shutdown_rpcs3_runtime()
     }
     g_file_open_filter.reset();
 
+    stop_all_controller_haptics();
     set_touch_controller_overlay_visible(false);
     clear_virtual_controller_state();
     set_idle_timer_disabled(false);
+    set_external_display_callback({});
     set_performance_callback({});
     set_lifecycle_callbacks({});
     shutdown();
