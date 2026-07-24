@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "IOSRuntimeIntegration.h"
+#include "IOSCoreDefaults.h"
 #include "platform/IOSPlatform.h"
 
 #include "Emu/System.h"
@@ -190,6 +191,7 @@ void initialize_rpcs3_runtime()
 
     configure_moltenvk({});
     initialize();
+    apply_core_compatibility_defaults();
     set_lifecycle_callbacks({
         .will_resign_active = [] { pause_for_ios_reason(ios_pause_inactive); },
         .did_become_active = [] { resume_after_ios_reason(ios_pause_inactive); },
