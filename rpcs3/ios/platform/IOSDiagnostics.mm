@@ -6,6 +6,7 @@
 #include <sys/sysctl.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
@@ -160,7 +161,7 @@ std::string build_diagnostics_report()
         report << index + 1 << ": " << controllers[index].vendor_name
             << ", motion=" << (capabilities.has_motion ? "yes" : "no")
             << ", haptics=" << (capabilities.has_haptics ? "yes" : "no");
-        if (capabilities.has_battery)
+        if (capabilities.has_battery && capabilities.battery_level >= 0.0f)
         {
             report << ", battery=" << std::fixed << std::setprecision(0) << capabilities.battery_level * 100.0f << '%';
         }
@@ -217,5 +218,4 @@ bool write_diagnostics_report(std::string* report_path, std::string* error)
         *report_path = utf8(path);
     }
     return true;
-}
 }
