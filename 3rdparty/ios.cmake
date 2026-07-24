@@ -1,8 +1,14 @@
 # iOS dependency selection for the RPCS3 core and full application targets.
 #
-# Desktop-only backends are represented by empty interface targets so their
-# feature macros remain disabled. Required cross-built dependencies fail early
-# with actionable paths instead of accidentally linking macOS host libraries.
+# Desktop-only backends are represented by feature-disabled interface targets.
+# Required cross-built dependencies fail early with actionable paths instead of
+# accidentally linking macOS host libraries. Physical USB and MIDI input use
+# explicit no-device compatibility libraries so the emulator core retains a
+# complete compile and link graph while keeping emulated devices available.
+
+if(NOT RPCS3_IOS)
+    message(FATAL_ERROR "3rdparty/ios.cmake is only valid for RPCS3 iOS builds")
+endif()
 
 include(CheckCXXCompilerFlag)
 
@@ -10,6 +16,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static dependencies for iOS" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "Disable dependency tests while cross-compiling" FORCE)
+set(LAZY_LOAD_LIBS OFF CACHE BOOL "Link Apple frameworks directly on iOS" FORCE)
+set(ABSL_PROPAGATE_CXX_STD ON CACHE BOOL "Propagate the RPCS3 C++ standard to Abseil" FORCE)
 
 include("${CMAKE_CURRENT_LIST_DIR}/DetectArchitecture.cmake")
 
@@ -102,6 +110,7 @@ find_library(RPCS3_IOS_VIDEOTOOLBOX VideoToolbox REQUIRED)
 find_library(RPCS3_IOS_ICONV iconv REQUIRED)
 find_library(RPCS3_IOS_RESOLV resolv REQUIRED)
 find_library(RPCS3_IOS_BZ2 bz2)
+find_library(RPCS3_IOS_SQLITE3 sqlite3)
 
 add_library(3rdparty_ios_system INTERFACE)
 target_link_libraries(3rdparty_ios_system INTERFACE
@@ -133,6 +142,13 @@ target_link_libraries(3rdparty_ios_system INTERFACE
 if(RPCS3_IOS_BZ2)
     target_link_libraries(3rdparty_ios_system INTERFACE "${RPCS3_IOS_BZ2}")
 endif()
+if(RPCS3_IOS_SQLITE3)
+    target_link_libraries(3rdparty_ios_system INTERFACE "${RPCS3_IOS_SQLITE3}")
+endif()
+target_link_options(3rdparty_ios_system INTERFACE "-ObjC")
+target_compile_definitions(3rdparty_ios_system INTERFACE
+    RPCS3_IOS_NO_USB_PASSTHROUGH=1
+    RPCS3_IOS_NO_MIDI_INPUT=1)
 add_library(3rdparty::ios_system ALIAS 3rdparty_ios_system)
 
 # Vulkan through a user-provided MoltenVK distribution.
@@ -186,27 +202,47 @@ endif()
 
 add_library(3rdparty_ffmpeg INTERFACE)
 target_include_directories(3rdparty_ffmpeg SYSTEM INTERFACE "${RPCS3_IOS_FFMPEG_ROOT}/include")
+# Static FFmpeg is order-sensitive. Repeat codec/util after the filter and
+# resampler libraries to resolve optional internal archive cycles.
 target_link_libraries(3rdparty_ffmpeg INTERFACE
     "${RPCS3_IOS_AVFORMAT}"
     "${RPCS3_IOS_AVCODEC}"
     "${RPCS3_IOS_SWSCALE}"
     "${RPCS3_IOS_SWRESAMPLE}"
     "${RPCS3_IOS_AVUTIL}"
+    "${RPCS3_IOS_AVCODEC}"
+    "${RPCS3_IOS_AVUTIL}"
     ${_rpcs3_ios_ffmpeg_platform_libraries})
 
-# Unsupported desktop/peripheral integrations. Keeping these as interface
-# targets lets the core compile its feature-disabled paths without pulling in
-# macOS host packages or unsupported device APIs.
+# Generic host USB passthrough is unavailable through public iOS APIs. This
+# target implements the libusb ABI subset used by RPCS3 and exposes zero
+# physical devices. Emulated USB devices continue to work.
+add_library(3rdparty_libusb STATIC
+    "${CMAKE_CURRENT_LIST_DIR}/ios/libusb/libusb_stub.cpp")
+target_compile_features(3rdparty_libusb PUBLIC cxx_std_20)
+target_include_directories(3rdparty_libusb SYSTEM PUBLIC
+    "${CMAKE_CURRENT_LIST_DIR}/ios/libusb/include")
+target_compile_definitions(3rdparty_libusb PUBLIC RPCS3_IOS_NO_USB_PASSTHROUGH=1)
+
+# MIDI adapter emulation remains compiled, but no host MIDI ports are exposed
+# until a native CoreMIDI bridge replaces this compatibility target.
+add_library(3rdparty_rtmidi STATIC
+    "${CMAKE_CURRENT_LIST_DIR}/ios/rtmidi/rtmidi_stub.cpp")
+target_compile_features(3rdparty_rtmidi PUBLIC cxx_std_20)
+target_include_directories(3rdparty_rtmidi SYSTEM PUBLIC
+    "${CMAKE_CURRENT_LIST_DIR}/ios/rtmidi/include")
+target_compile_definitions(3rdparty_rtmidi PUBLIC RPCS3_IOS_NO_MIDI_INPUT=1)
+
+# Unsupported desktop/frontend integrations. These targets intentionally do
+# not define their HAVE_* feature macros.
 add_library(3rdparty_discordRPC INTERFACE)
 add_library(3rdparty_libevdev INTERFACE)
 add_library(3rdparty_hidapi INTERFACE)
-add_library(3rdparty_libusb INTERFACE)
 add_library(3rdparty_openal INTERFACE)
 target_compile_definitions(3rdparty_openal INTERFACE WITHOUT_OPENAL=1)
 add_library(3rdparty_faudio INTERFACE)
 add_library(3rdparty_sdl3 INTERFACE)
 add_library(3rdparty_opencv INTERFACE)
-add_library(3rdparty_rtmidi INTERFACE)
 
 # Vulkan Memory Allocator is header-only.
 add_library(3rdparty_vulkanmemoryallocator INTERFACE)
@@ -244,4 +280,4 @@ add_library(3rdparty::feralinteractive ALIAS 3rdparty_feralinteractive)
 add_library(3rdparty::hidapi ALIAS 3rdparty_hidapi)
 add_library(3rdparty::libusb ALIAS 3rdparty_libusb)
 
-message(STATUS "RPCS3: configured final-link-complete iOS third-party dependencies")
+message(STATUS "RPCS3: configured concrete final-link-complete iOS dependencies")
