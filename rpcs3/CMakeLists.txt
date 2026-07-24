@@ -23,7 +23,7 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
     endif()
 endif()
 
-if (NOT ANDROID)
+if(NOT ANDROID AND (NOT RPCS3_IOS OR RPCS3_IOS_BUILD_QT_FRONTEND))
     # Qt
     # finds Qt libraries and setups custom commands for MOC and UIC
     # Must be done here because generated MOC and UIC targets cant
@@ -35,18 +35,27 @@ if(RPCS3_IOS)
     add_subdirectory(ios/platform)
 endif()
 
-# subdirectories
+# Emulator core
 add_subdirectory(Emu)
 
 if(RPCS3_IOS)
     target_link_libraries(rpcs3_emu PUBLIC rpcs3_ios_platform)
 endif()
 
+gen_git_version(${CMAKE_CURRENT_SOURCE_DIR})
+
+if(RPCS3_IOS AND NOT RPCS3_IOS_BUILD_QT_FRONTEND)
+    add_library(rpcs3_ios_core STATIC ios/CoreAnchor.cpp)
+    target_compile_features(rpcs3_ios_core PRIVATE cxx_std_20)
+    target_link_libraries(rpcs3_ios_core PUBLIC rpcs3_emu rpcs3_ios_platform)
+    set_target_properties(rpcs3_ios_core PROPERTIES
+        XCODE_ATTRIBUTE_SKIP_INSTALL YES)
+    return()
+endif()
+
 if (NOT ANDROID)
     add_subdirectory(rpcs3qt)
 endif()
-
-gen_git_version(${CMAKE_CURRENT_SOURCE_DIR})
 
 if (NOT ANDROID)
     # Build rpcs3_lib
