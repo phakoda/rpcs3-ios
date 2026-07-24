@@ -103,11 +103,37 @@ if (NOT ANDROID)
         target_sources(rpcs3 PRIVATE rpcs3.rc)
         target_compile_definitions(rpcs3 PRIVATE UNICODE _UNICODE)
     elseif(APPLE)
-        target_sources(rpcs3 PRIVATE rpcs3.icns update_helper.sh)
-        set_source_files_properties(update_helper.sh PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-        set_target_properties(rpcs3
-            PROPERTIES
-                MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/rpcs3.plist.in")
+        if(RPCS3_IOS)
+            set_target_properties(rpcs3
+                PROPERTIES
+                    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/ios/Info.plist.in"
+                    XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "net.rpcs3.ios"
+                    XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+                    XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+                    XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "iphoneos iphonesimulator"
+                    XCODE_ATTRIBUTE_SUPPORTS_MACCATALYST "NO"
+                    XCODE_ATTRIBUTE_SKIP_INSTALL "NO")
+            target_link_options(rpcs3 PRIVATE "-ObjC")
+            target_link_libraries(rpcs3 PRIVATE
+                "-framework UIKit"
+                "-framework Foundation"
+                "-framework QuartzCore"
+                "-framework Metal"
+                "-framework IOSurface"
+                "-framework CoreGraphics"
+                "-framework CoreVideo")
+            if(RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS)
+                set_target_properties(rpcs3
+                    PROPERTIES
+                        XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_CURRENT_SOURCE_DIR}/ios/JIT.entitlements")
+            endif()
+        else()
+            target_sources(rpcs3 PRIVATE rpcs3.icns update_helper.sh)
+            set_source_files_properties(update_helper.sh PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+            set_target_properties(rpcs3
+                PROPERTIES
+                    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/rpcs3.plist.in")
+        endif()
     endif()
 
     target_sources(rpcs3
@@ -127,11 +153,13 @@ if (NOT ANDROID)
     # Copy icons to executable directory
     if(APPLE)
         qt_finalize_target(rpcs3)
-        add_custom_command(TARGET rpcs3 POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/rpcs3.icns $<TARGET_FILE_DIR:rpcs3>/../Resources/rpcs3.icns
-            COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bin/Icons $<TARGET_FILE_DIR:rpcs3>/../Resources/Icons
-            COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bin/GuiConfigs $<TARGET_FILE_DIR:rpcs3>/../Resources/GuiConfigs
-            COMMAND "${MACDEPLOYQT_EXECUTABLE}" "${PROJECT_BINARY_DIR}/bin/rpcs3.app" "$<$<CONFIG:Debug,RelWithDebInfo>:-no-strip>")
+        if(NOT RPCS3_IOS)
+            add_custom_command(TARGET rpcs3 POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/rpcs3.icns $<TARGET_FILE_DIR:rpcs3>/../Resources/rpcs3.icns
+                COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bin/Icons $<TARGET_FILE_DIR:rpcs3>/../Resources/Icons
+                COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bin/GuiConfigs $<TARGET_FILE_DIR:rpcs3>/../Resources/GuiConfigs
+                COMMAND "${MACDEPLOYQT_EXECUTABLE}" "${PROJECT_BINARY_DIR}/bin/rpcs3.app" "$<$<CONFIG:Debug,RelWithDebInfo>:-no-strip>")
+        endif()
     elseif(UNIX)
         add_custom_command(TARGET rpcs3 POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bin/Icons $<TARGET_FILE_DIR:rpcs3>/Icons
