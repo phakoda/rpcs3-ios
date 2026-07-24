@@ -118,7 +118,11 @@ if(RPCS3_IOS_BOOTSTRAP_ONLY)
     return()
 endif()
 
-add_subdirectory(3rdparty)
+if(RPCS3_IOS)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/ios.cmake")
+else()
+    add_subdirectory(3rdparty)
+endif()
 
 if (DISABLE_LTO)
     if (CMAKE_C_FLAGS)
