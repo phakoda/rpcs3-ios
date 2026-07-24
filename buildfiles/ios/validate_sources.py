@@ -22,14 +22,26 @@ REQUIRED_FILES = (
     "buildfiles/ios/configure.sh",
     "buildfiles/ios/build_ffmpeg.sh",
     "buildfiles/ios/validate_environment.sh",
+    "buildfiles/ios/validate_sources.py",
     "buildfiles/ios/archive.sh",
     "buildfiles/ios/deploy.sh",
+    "buildfiles/ios/report_signing.sh",
     "rpcs3/ios/CMakeLists.txt",
     "rpcs3/ios/PatchCoreSources.cmake",
+    "rpcs3/ios/IOSBootstrapViewController.h",
+    "rpcs3/ios/IOSBootstrapViewController.mm",
+    "rpcs3/ios/IOSVulkanProbe.h",
+    "rpcs3/ios/IOSVulkanProbe.mm",
     "rpcs3/ios/platform/IOSPlatform.h",
     "rpcs3/ios/platform/IOSPlatform.mm",
     "rpcs3/ios/platform/IOSJIT.mm",
+    "rpcs3/ios/platform/IOSJITProvider.mm",
     "rpcs3/ios/platform/IOSPerformance.mm",
+    "rpcs3/ios/platform/IOSControllerFeatures.h",
+    "rpcs3/ios/platform/IOSControllerFeatures.mm",
+    "rpcs3/ios/platform/IOSExternalDisplay.mm",
+    "rpcs3/ios/platform/IOSMoltenVK.mm",
+    "rpcs3/ios/platform/IOSDiagnostics.mm",
     "rpcs3/ios/platform/IOSTouchController.mm",
     "rpcs3/ios/platform/IOSVirtualController.cpp",
     "rpcs3/Input/ios_gamecontroller_pad_handler.h",
@@ -48,6 +60,7 @@ SHELL_SCRIPTS = (
     "buildfiles/ios/validate_environment.sh",
     "buildfiles/ios/archive.sh",
     "buildfiles/ios/deploy.sh",
+    "buildfiles/ios/report_signing.sh",
 )
 
 FORBIDDEN_ENTITLEMENTS = {
@@ -57,10 +70,23 @@ FORBIDDEN_ENTITLEMENTS = {
     "com.apple.private.security.container-required",
 }
 
+FORBIDDEN_PRIVATE_MOLTENVK_FLAGS = (
+    "MVK_CONFIG_USE_METAL_PRIVATE_API",
+    "MVK_CONFIG_METAL_COMPILE_TIMEOUT",
+    "MTL_DEBUG_LAYER",
+)
+
 ANCHORS = {
     "Utilities/File.cpp": (
         "// App bundle directory is three levels up from the binary.",
         "return get_parent_dir(bin_path, 3);",
+    ),
+    "rpcs3/util/vm_native.cpp": (
+        '#include "util/asm.hpp"',
+        "void memory_commit(void* pointer, usz size, protection prot)",
+        "void memory_reset(void* pointer, usz size, protection prot",
+        "void memory_protect(void* pointer, usz size, protection prot)",
+        "ensure(::mprotect(",
     ),
     "rpcs3/rpcs3.cpp": (
         '#include "Emu/savestate_utils.hpp"',
@@ -116,9 +142,20 @@ def validate_plists(root: Path, errors: list[str]) -> None:
     if info_path.is_file():
         with info_path.open("rb") as stream:
             info = plistlib.load(stream)
-        for key in ("CFBundleIdentifier", "CFBundleExecutable", "UISupportedInterfaceOrientations"):
+        for key in (
+            "CFBundleIdentifier",
+            "CFBundleExecutable",
+            "UISupportedInterfaceOrientations",
+            "LSApplicationQueriesSchemes",
+            "NSLocalNetworkUsageDescription",
+        ):
             if key not in info:
                 fail(errors, f"Info.plist is missing {key}")
+
+        schemes = set(info.get("LSApplicationQueriesSchemes", []))
+        for scheme in ("apple-magnifier", "stikjit"):
+            if scheme not in schemes:
+                fail(errors, f"Info.plist is missing the public JIT provider scheme {scheme!r}")
 
 
 def validate_shell_scripts(root: Path, errors: list[str]) -> None:
@@ -146,12 +183,11 @@ def validate_patch_anchors(root: Path, errors: list[str]) -> None:
 
 def validate_cmake_contracts(root: Path, errors: list[str]) -> None:
     root_cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8")
-    required_root_contracts = (
+    for contract in (
         "RPCS3_IOS_BOOTSTRAP_ONLY",
         "3rdparty/ios.cmake",
         "PatchCoreSources.cmake",
-    )
-    for contract in required_root_contracts:
+    ):
         if contract not in root_cmake:
             fail(errors, f"root CMake contract missing: {contract}")
 
@@ -174,6 +210,72 @@ def validate_cmake_contracts(root: Path, errors: list[str]) -> None:
         if contract not in dependencies:
             fail(errors, f"iOS dependency contract missing: {contract}")
 
+    platform_cmake = (root / "rpcs3/ios/platform/CMakeLists.txt").read_text(encoding="utf-8")
+    for contract in (
+        "IOSJITProvider.mm",
+        "IOSControllerFeatures.mm",
+        "IOSExternalDisplay.mm",
+        "IOSMoltenVK.mm",
+        "IOSDiagnostics.mm",
+        "CoreHaptics",
+        "CoreMotion",
+    ):
+        if contract not in platform_cmake:
+            fail(errors, f"iOS platform build contract missing: {contract}")
+
+    bootstrap_cmake = (root / "rpcs3/ios/CMakeLists.txt").read_text(encoding="utf-8")
+    for contract in ("IOSBootstrapViewController.mm", "IOSVulkanProbe.mm"):
+        if contract not in bootstrap_cmake:
+            fail(errors, f"bootstrap build contract missing: {contract}")
+
+
+def validate_platform_contracts(root: Path, errors: list[str]) -> None:
+    platform = (root / "rpcs3/ios/platform/IOSPlatform.h").read_text(encoding="utf-8")
+    required_apis = (
+        "allocate_jit_memory",
+        "publish_jit_memory",
+        "query_extended_jit_capabilities",
+        "request_jit",
+        "get_combined_controller_motion",
+        "set_combined_controller_rumble",
+        "get_external_display_state",
+        "configure_moltenvk",
+        "write_diagnostics_report",
+    )
+    for api in required_apis:
+        if api not in platform:
+            fail(errors, f"expanded iOS platform API missing: {api}")
+
+    jit = (root / "rpcs3/ios/platform/IOSJIT.mm").read_text(encoding="utf-8")
+    for contract in ("mach_vm_remap", "sys_icache_invalidate", "pthread_jit_write_protect_np"):
+        if contract not in jit:
+            fail(errors, f"JIT memory contract missing: {contract}")
+
+    provider = (root / "rpcs3/ios/platform/IOSJITProvider.mm").read_text(encoding="utf-8")
+    for contract in ("apple-magnifier://", "stikjit://", "[fd00::]:9172/attach"):
+        if contract not in provider:
+            fail(errors, f"external JIT provider contract missing: {contract}")
+
+    controller = (root / "rpcs3/ios/platform/IOSControllerFeatures.mm").read_text(encoding="utf-8")
+    for contract in ("CoreMotion", "CoreHaptics", "GCHapticsLocalityAll", "deviceMotion"):
+        if contract not in controller:
+            fail(errors, f"controller feature contract missing: {contract}")
+
+    moltenvk = (root / "rpcs3/ios/platform/IOSMoltenVK.mm").read_text(encoding="utf-8")
+    for forbidden in FORBIDDEN_PRIVATE_MOLTENVK_FLAGS:
+        if forbidden in moltenvk:
+            fail(errors, f"private or debug-only MoltenVK/Metal flag added: {forbidden}")
+
+    patch = (root / "rpcs3/ios/PatchCoreSources.cmake").read_text(encoding="utf-8")
+    for contract in (
+        "if(TARGET rpcs3_emu)",
+        "if(TARGET rpcs3_ui)",
+        "set_jit_write_protection",
+        "__builtin___clear_cache",
+    ):
+        if contract not in patch:
+            fail(errors, f"generated iOS core adaptation missing: {contract}")
+
 
 def validate_controller_contract(root: Path, errors: list[str]) -> None:
     enum_header = (root / "rpcs3/Emu/Io/pad_config_types.h").read_text(encoding="utf-8")
@@ -184,7 +286,10 @@ def validate_controller_contract(root: Path, errors: list[str]) -> None:
     checks = (
         ("ios_gamecontroller", enum_header, "handler enum"),
         ("iOS GameController", enum_source, "handler serialization"),
-        ("get_combined_controller_states", handler, "handler state source"),
+        ("get_combined_controller_state", handler, "handler state source"),
+        ("get_combined_controller_motion", handler, "motion integration"),
+        ("set_combined_controller_rumble", handler, "rumble integration"),
+        ("get_battery_level", handler, "battery integration"),
         ("attach_touch_controller_overlay", platform, "touch overlay API"),
     )
     for needle, haystack, description in checks:
@@ -212,6 +317,7 @@ def main() -> int:
     validate_shell_scripts(root, errors)
     validate_patch_anchors(root, errors)
     validate_cmake_contracts(root, errors)
+    validate_platform_contracts(root, errors)
     validate_controller_contract(root, errors)
     validate_no_claims_of_completion(root, errors)
 
