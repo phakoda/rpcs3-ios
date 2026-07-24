@@ -5,6 +5,7 @@
 #include "ios/platform/IOSPlatform.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 
 namespace
@@ -107,8 +108,10 @@ bool ios_gamecontroller_pad_handler::parse_device_index(std::string_view name, u
         return false;
     }
 
+    const std::string_view number = name.substr(prefix.size());
     u64 parsed = 0;
-    if (!try_to_uint64(&parsed, name.substr(prefix.size()), 1, MAX_GAMEPADS))
+    const auto [end, error] = std::from_chars(number.data(), number.data() + number.size(), parsed);
+    if (error != std::errc{} || end != number.data() + number.size() || parsed < 1 || parsed > MAX_GAMEPADS)
     {
         return false;
     }
@@ -120,7 +123,7 @@ bool ios_gamecontroller_pad_handler::parse_device_index(std::string_view name, u
 std::vector<pad_list_entry> ios_gamecontroller_pad_handler::list_devices()
 {
     std::vector<pad_list_entry> devices;
-    const auto controllers = rpcs3::ios::get_controller_states();
+    const auto controllers = rpcs3::ios::get_combined_controller_states();
     devices.reserve(std::max<usz>(controllers.size(), 1));
 
     for (usz index = 0; index < controllers.size() && index < MAX_GAMEPADS; ++index)
@@ -262,7 +265,7 @@ PadHandlerBase::connection ios_gamecontroller_pad_handler::update_connection(con
         return connection::disconnected;
     }
 
-    const auto controllers = rpcs3::ios::get_controller_states();
+    const auto controllers = rpcs3::ios::get_combined_controller_states();
     if (controller->controller_index >= controllers.size())
     {
         return connection::disconnected;
@@ -285,7 +288,7 @@ std::unordered_map<u32, u16> ios_gamecontroller_pad_handler::get_button_values(c
         return values;
     }
 
-    const auto controllers = rpcs3::ios::get_controller_states();
+    const auto controllers = rpcs3::ios::get_combined_controller_states();
     if (controller->controller_index >= controllers.size())
     {
         return values;
