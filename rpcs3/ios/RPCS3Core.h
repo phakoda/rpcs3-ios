@@ -104,12 +104,19 @@ typedef struct rpcs3_ios_performance_status
 RPCS3_IOS_CORE_EXPORT extern double RPCS3CoreVersionNumber;
 RPCS3_IOS_CORE_EXPORT extern const unsigned char RPCS3CoreVersionString[];
 
-// Initializes native iOS services and the headless RPCS3 emulator object. The
-// framework core uses Vulkan-compatible configuration defaults but a Null RSX
-// output until a host application supplies a renderer surface.
+// Initializes native iOS services and the RPCS3 emulator object. The core can
+// run headlessly with Null RSX or select Vulkan/MoltenVK when a render view has
+// been supplied before boot.
 RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_initialize(void);
 RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_shutdown(void);
 RPCS3_IOS_CORE_EXPORT uint8_t rpcs3_ios_core_is_initialized(void);
+
+// native_view must be a retained or otherwise live UIView backed by
+// CAMetalLayer. Pass it from Objective-C/Objective-C++ as (__bridge void*)view.
+// The view can be changed only while emulation is stopped.
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_set_render_view(void* native_view);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_clear_render_view(void);
+RPCS3_IOS_CORE_EXPORT uint8_t rpcs3_ios_core_has_render_view(void);
 
 // Events are delivered on the UIKit main queue. The caller owns context and
 // must clear the callback before releasing it or unloading the framework host.
