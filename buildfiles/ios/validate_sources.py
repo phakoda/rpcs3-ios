@@ -21,6 +21,7 @@ REQUIRED_FILES = (
     "buildfiles/cmake/ConfigureIOS.cmake",
     "buildfiles/ios/configure.sh",
     "buildfiles/ios/build_ffmpeg.sh",
+    "buildfiles/ios/build_llvm.sh",
     "buildfiles/ios/validate_environment.sh",
     "buildfiles/ios/validate_sources.py",
     "buildfiles/ios/archive.sh",
@@ -39,6 +40,7 @@ REQUIRED_FILES = (
     "rpcs3/ios/platform/IOSPerformance.mm",
     "rpcs3/ios/platform/IOSControllerFeatures.h",
     "rpcs3/ios/platform/IOSControllerFeatures.mm",
+    "rpcs3/ios/platform/IOSControllerLight.mm",
     "rpcs3/ios/platform/IOSExternalDisplay.mm",
     "rpcs3/ios/platform/IOSMoltenVK.mm",
     "rpcs3/ios/platform/IOSDiagnostics.mm",
@@ -57,6 +59,7 @@ PLISTS = (
 SHELL_SCRIPTS = (
     "buildfiles/ios/configure.sh",
     "buildfiles/ios/build_ffmpeg.sh",
+    "buildfiles/ios/build_llvm.sh",
     "buildfiles/ios/validate_environment.sh",
     "buildfiles/ios/archive.sh",
     "buildfiles/ios/deploy.sh",
@@ -74,6 +77,13 @@ FORBIDDEN_PRIVATE_MOLTENVK_FLAGS = (
     "MVK_CONFIG_USE_METAL_PRIVATE_API",
     "MVK_CONFIG_METAL_COMPILE_TIMEOUT",
     "MTL_DEBUG_LAYER",
+)
+
+FORBIDDEN_PRIVATE_APIS = (
+    "SpringBoardServices",
+    "SBSLaunchApplicationWithIdentifier",
+    "MobileGestalt",
+    "com.apple.private",
 )
 
 ANCHORS = {
@@ -146,6 +156,7 @@ def validate_plists(root: Path, errors: list[str]) -> None:
             "CFBundleIdentifier",
             "CFBundleExecutable",
             "UISupportedInterfaceOrientations",
+            "GCSupportsControllerUserInteraction",
             "LSApplicationQueriesSchemes",
             "NSLocalNetworkUsageDescription",
         ):
@@ -195,6 +206,7 @@ def validate_cmake_contracts(root: Path, errors: list[str]) -> None:
     for option in (
         "RPCS3_IOS_BUILD_QT_FRONTEND",
         "RPCS3_IOS_ENABLE_LLVM",
+        "RPCS3_IOS_LLVM_ROOT",
         "RPCS3_IOS_ENTITLEMENTS_FILE",
     ):
         if option not in configure:
@@ -214,6 +226,7 @@ def validate_cmake_contracts(root: Path, errors: list[str]) -> None:
     for contract in (
         "IOSJITProvider.mm",
         "IOSControllerFeatures.mm",
+        "IOSControllerLight.mm",
         "IOSExternalDisplay.mm",
         "IOSMoltenVK.mm",
         "IOSDiagnostics.mm",
@@ -228,6 +241,11 @@ def validate_cmake_contracts(root: Path, errors: list[str]) -> None:
         if contract not in bootstrap_cmake:
             fail(errors, f"bootstrap build contract missing: {contract}")
 
+    llvm_builder = (root / "buildfiles/ios/build_llvm.sh").read_text(encoding="utf-8")
+    for contract in ("llvm-tblgen", "LLVM_TABLEGEN", "LLVMConfig.cmake", "CMAKE_SYSTEM_NAME=iOS"):
+        if contract not in llvm_builder:
+            fail(errors, f"LLVM cross-build contract missing: {contract}")
+
 
 def validate_platform_contracts(root: Path, errors: list[str]) -> None:
     platform = (root / "rpcs3/ios/platform/IOSPlatform.h").read_text(encoding="utf-8")
@@ -236,8 +254,10 @@ def validate_platform_contracts(root: Path, errors: list[str]) -> None:
         "publish_jit_memory",
         "query_extended_jit_capabilities",
         "request_jit",
+        "wait_for_jit_enablement",
         "get_combined_controller_motion",
         "set_combined_controller_rumble",
+        "set_combined_controller_light",
         "get_external_display_state",
         "configure_moltenvk",
         "write_diagnostics_report",
@@ -252,19 +272,44 @@ def validate_platform_contracts(root: Path, errors: list[str]) -> None:
             fail(errors, f"JIT memory contract missing: {contract}")
 
     provider = (root / "rpcs3/ios/platform/IOSJITProvider.mm").read_text(encoding="utf-8")
-    for contract in ("apple-magnifier://", "stikjit://", "[fd00::]:9172/attach"):
+    for contract in (
+        "apple-magnifier://",
+        "stikjit://enable-jit",
+        "[fd00::]:9172/attach",
+        "wait_for_jit_enablement",
+    ):
         if contract not in provider:
             fail(errors, f"external JIT provider contract missing: {contract}")
 
     controller = (root / "rpcs3/ios/platform/IOSControllerFeatures.mm").read_text(encoding="utf-8")
-    for contract in ("CoreMotion", "CoreHaptics", "GCHapticsLocalityAll", "deviceMotion"):
+    for contract in (
+        "CoreMotion",
+        "CoreHaptics",
+        "GCHapticsLocalityAll",
+        "deviceMotion",
+        "normalize_hardware_controller_slots",
+    ):
         if contract not in controller:
             fail(errors, f"controller feature contract missing: {contract}")
+
+    controller_light = (root / "rpcs3/ios/platform/IOSControllerLight.mm").read_text(encoding="utf-8")
+    for contract in ("GCDeviceLight", "GCColor", "set_hardware_controller_light"):
+        if contract not in controller_light:
+            fail(errors, f"controller light contract missing: {contract}")
 
     moltenvk = (root / "rpcs3/ios/platform/IOSMoltenVK.mm").read_text(encoding="utf-8")
     for forbidden in FORBIDDEN_PRIVATE_MOLTENVK_FLAGS:
         if forbidden in moltenvk:
             fail(errors, f"private or debug-only MoltenVK/Metal flag added: {forbidden}")
+
+    ios_sources = "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in (root / "rpcs3/ios").rglob("*")
+        if path.is_file()
+    )
+    for forbidden in FORBIDDEN_PRIVATE_APIS:
+        if forbidden in ios_sources:
+            fail(errors, f"private Apple API or entitlement marker added to iOS sources: {forbidden}")
 
     patch = (root / "rpcs3/ios/PatchCoreSources.cmake").read_text(encoding="utf-8")
     for contract in (
@@ -289,7 +334,9 @@ def validate_controller_contract(root: Path, errors: list[str]) -> None:
         ("get_combined_controller_state", handler, "handler state source"),
         ("get_combined_controller_motion", handler, "motion integration"),
         ("set_combined_controller_rumble", handler, "rumble integration"),
+        ("set_combined_controller_light", handler, "controller light integration"),
         ("get_battery_level", handler, "battery integration"),
+        ("colorR.get()", handler, "RGB configuration integration"),
         ("attach_touch_controller_overlay", platform, "touch overlay API"),
     )
     for needle, haystack, description in checks:
