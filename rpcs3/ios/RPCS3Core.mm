@@ -1,5 +1,6 @@
 #include "RPCS3Core.h"
 #include "IOSCoreDefaults.h"
+#include "IOSCoreEmulator.h"
 #include "platform/IOSPlatform.h"
 
 #include <algorithm>
@@ -17,7 +18,6 @@ namespace
 {
 std::atomic_bool g_initialized = false;
 std::mutex g_core_mutex;
-std::string g_last_error;
 
 thread_local std::string g_application_support_path;
 thread_local std::string g_caches_path;
@@ -47,12 +47,24 @@ const char* refresh_path(std::string& storage, const std::string& value)
     storage = value;
     return storage.c_str();
 }
+
+rpcs3_ios_core_result fail_initialization(std::string error)
+{
+    rpcs3::ios::shutdown_core_emulator();
+    rpcs3::ios::stop_all_controller_haptics();
+    rpcs3::ios::set_external_display_callback({});
+    rpcs3::ios::set_performance_callback({});
+    rpcs3::ios::set_lifecycle_callbacks({});
+    rpcs3::ios::shutdown();
+    rpcs3::ios::set_core_last_error(std::move(error));
+    return RPCS3_IOS_CORE_PLATFORM_ERROR;
+}
 }
 
 extern "C"
 {
-double RPCS3CoreVersionNumber = 0.1;
-const unsigned char RPCS3CoreVersionString[] = "RPCS3Core 0.1";
+double RPCS3CoreVersionNumber = 0.2;
+const unsigned char RPCS3CoreVersionString[] = "RPCS3Core 0.2";
 
 rpcs3_ios_core_result rpcs3_ios_core_initialize(void)
 {
@@ -69,19 +81,24 @@ rpcs3_ios_core_result rpcs3_ios_core_initialize(void)
     std::string error;
     if (!rpcs3::ios::prepare_runtime_directories(&error))
     {
-        rpcs3::ios::shutdown();
-        g_last_error = error.empty() ? "Could not prepare the RPCS3 iOS runtime directories." : std::move(error);
-        return RPCS3_IOS_CORE_PLATFORM_ERROR;
+        return fail_initialization(error.empty()
+            ? "Could not prepare the RPCS3 iOS runtime directories."
+            : std::move(error));
     }
 
     if (rpcs3::ios::core_port_anchor() != 0)
     {
-        rpcs3::ios::shutdown();
-        g_last_error = "The RPCS3 iOS core anchor could not resolve its Application Support path.";
-        return RPCS3_IOS_CORE_PLATFORM_ERROR;
+        return fail_initialization("The RPCS3 iOS core anchor could not resolve its Application Support path.");
     }
 
-    g_last_error.clear();
+    if (!rpcs3::ios::initialize_core_emulator(&error))
+    {
+        return fail_initialization(error.empty()
+            ? "Could not initialize the RPCS3 emulator object."
+            : std::move(error));
+    }
+
+    rpcs3::ios::set_core_last_error({});
     g_initialized.store(true);
     return RPCS3_IOS_CORE_SUCCESS;
 }
@@ -94,6 +111,9 @@ rpcs3_ios_core_result rpcs3_ios_core_shutdown(void)
         return RPCS3_IOS_CORE_NOT_INITIALIZED;
     }
 
+    // Stop guest threads and destroy emulator-owned fixed objects before native
+    // controller, display, audio, and notification services disappear.
+    rpcs3::ios::shutdown_core_emulator();
     rpcs3::ios::stop_all_controller_haptics();
     rpcs3::ios::set_external_display_callback({});
     rpcs3::ios::set_performance_callback({});
@@ -175,10 +195,7 @@ size_t rpcs3_ios_core_copy_diagnostics(char* buffer, size_t buffer_size)
 
 size_t rpcs3_ios_core_copy_last_error(char* buffer, size_t buffer_size)
 {
-    {
-        std::lock_guard lock(g_core_mutex);
-        g_error_copy = g_last_error;
-    }
+    g_error_copy = rpcs3::ios::get_core_last_error();
     return copy_string(g_error_copy, buffer, buffer_size);
 }
 
