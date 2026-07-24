@@ -12,6 +12,17 @@ project(rpcs3 LANGUAGES C CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+set(RPCS3_IOS OFF)
+if(APPLE AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(RPCS3_IOS ON)
+endif()
+
+option(RPCS3_IOS_BOOTSTRAP_ONLY "Build the native iOS Vulkan bring-up app instead of the desktop RPCS3 frontend" ${RPCS3_IOS})
+
+if(RPCS3_IOS)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/buildfiles/cmake/ConfigureIOS.cmake")
+endif()
+
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13)
         message(FATAL_ERROR "RPCS3 requires at least gcc-13.")
@@ -93,13 +104,18 @@ if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "RPCS3 can only be compiled on 64-bit platforms.")
 endif()
 
-if(APPLE AND CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+if(APPLE AND NOT RPCS3_IOS AND CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
     list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
     list(APPEND CMAKE_SYSTEM_PREFIX_PATH "/opt/homebrew")
 endif()
 
 if(MSVC)
     add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:/wd4530;/utf-8>") # C++ exception handler used, but unwind semantics are not enabled
+endif()
+
+if(RPCS3_IOS_BOOTSTRAP_ONLY)
+    add_subdirectory(rpcs3/ios)
+    return()
 endif()
 
 add_subdirectory(3rdparty)
