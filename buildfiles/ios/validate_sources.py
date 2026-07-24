@@ -22,8 +22,10 @@ REQUIRED_FILES = (
     "buildfiles/ios/configure.sh",
     "buildfiles/ios/build_ffmpeg.sh",
     "buildfiles/ios/build_llvm.sh",
+    "buildfiles/ios/create_core_xcframework.sh",
     "buildfiles/ios/validate_environment.sh",
     "buildfiles/ios/validate_sources.py",
+    "buildfiles/ios/validate_core.py",
     "buildfiles/ios/archive.sh",
     "buildfiles/ios/deploy.sh",
     "buildfiles/ios/report_signing.sh",
@@ -60,6 +62,7 @@ SHELL_SCRIPTS = (
     "buildfiles/ios/configure.sh",
     "buildfiles/ios/build_ffmpeg.sh",
     "buildfiles/ios/build_llvm.sh",
+    "buildfiles/ios/create_core_xcframework.sh",
     "buildfiles/ios/validate_environment.sh",
     "buildfiles/ios/archive.sh",
     "buildfiles/ios/deploy.sh",
@@ -113,9 +116,9 @@ ANCHORS = {
         "return std::make_shared<ps_move_handler>();",
     ),
     "rpcs3/Input/gui_pad_thread.cpp": (
-        '#include "keyboard_pad_handler.h"',
+        '#include "gui_pad_thread.h"',
         "case pad_handler::dualsense:",
-        "return std::make_unique<dualsense_pad_handler>();",
+        "return std::make_shared<dualsense_pad_handler>();",
     ),
 }
 
