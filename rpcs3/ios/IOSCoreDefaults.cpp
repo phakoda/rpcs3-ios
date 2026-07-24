@@ -9,7 +9,7 @@ void apply_core_compatibility_defaults()
     // MoltenVK is the only renderer linked into iOS targets.
     g_cfg.video.renderer = video_renderer::vulkan;
 
-#ifndef WITH_LLVM
+#ifndef RPCS3_IOS_HAS_LLVM
     if (g_cfg.core.ppu_decoder == ppu_decoder_type::llvm)
     {
         g_cfg.core.ppu_decoder = ppu_decoder_type::_static;
