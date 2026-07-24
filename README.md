@@ -37,7 +37,7 @@ If you are unsure about your work, open a discussion issue to talk it through wi
 
 See [BUILDING.md](BUILDING.md) for desktop build instructions.
 
-The experimental iOS/iPadOS bring-up workflow is documented in [BUILDING_IOS.md](BUILDING_IOS.md).
+The experimental iOS/iPadOS workflow is documented in [BUILDING_IOS.md](BUILDING_IOS.md). The implementation architecture, reference-emulator rationale, status matrix, and remaining evidence gates are tracked in [PORTING_IOS.md](PORTING_IOS.md).
 
 ## Running
 
