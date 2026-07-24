@@ -18,6 +18,9 @@ namespace
 {
 std::atomic_bool g_initialized = false;
 std::mutex g_core_mutex;
+std::mutex g_import_mutex;
+std::string g_pending_import_source;
+std::string g_pending_import_path;
 
 thread_local std::string g_application_support_path;
 thread_local std::string g_caches_path;
@@ -48,8 +51,16 @@ const char* refresh_path(std::string& storage, const std::string& value)
     return storage.c_str();
 }
 
+void clear_pending_import()
+{
+    std::lock_guard lock(g_import_mutex);
+    g_pending_import_source.clear();
+    g_pending_import_path.clear();
+}
+
 rpcs3_ios_core_result fail_initialization(std::string error)
 {
+    clear_pending_import();
     rpcs3::ios::shutdown_core_emulator();
     rpcs3::ios::stop_all_controller_haptics();
     rpcs3::ios::set_external_display_callback({});
@@ -98,6 +109,7 @@ rpcs3_ios_core_result rpcs3_ios_core_initialize(void)
             : std::move(error));
     }
 
+    clear_pending_import();
     rpcs3::ios::set_core_last_error({});
     g_initialized.store(true);
     return RPCS3_IOS_CORE_SUCCESS;
@@ -119,6 +131,7 @@ rpcs3_ios_core_result rpcs3_ios_core_shutdown(void)
     rpcs3::ios::set_performance_callback({});
     rpcs3::ios::set_lifecycle_callbacks({});
     rpcs3::ios::shutdown();
+    clear_pending_import();
     g_initialized.store(false);
     return RPCS3_IOS_CORE_SUCCESS;
 }
@@ -144,21 +157,34 @@ rpcs3_ios_core_result rpcs3_ios_core_import_path(
         return RPCS3_IOS_CORE_INVALID_ARGUMENT;
     }
 
-    std::string stable_path;
-    std::string error;
-    if (!rpcs3::ios::import_item(source_path, &stable_path, &error))
+    std::lock_guard import_lock(g_import_mutex);
+    if (g_pending_import_source != source_path || g_pending_import_path.empty())
     {
-        rpcs3::ios::set_core_last_error(error.empty() ? "The selected item could not be imported." : error);
-        return RPCS3_IOS_CORE_PLATFORM_ERROR;
+        std::string stable_path;
+        std::string error;
+        if (!rpcs3::ios::import_item(source_path, &stable_path, &error))
+        {
+            g_pending_import_source.clear();
+            g_pending_import_path.clear();
+            rpcs3::ios::set_core_last_error(error.empty() ? "The selected item could not be imported." : error);
+            return RPCS3_IOS_CORE_PLATFORM_ERROR;
+        }
+
+        g_pending_import_source = source_path;
+        g_pending_import_path = std::move(stable_path);
     }
 
-    *required_size = stable_path.size() + 1;
+    *required_size = g_pending_import_path.size() + 1;
     if (!imported_path || imported_path_size < *required_size)
     {
+        // The item has already been copied. Keep the stable path cached so the
+        // caller can retry with the reported size without importing it again.
         return RPCS3_IOS_CORE_BUFFER_TOO_SMALL;
     }
 
-    std::memcpy(imported_path, stable_path.c_str(), *required_size);
+    std::memcpy(imported_path, g_pending_import_path.c_str(), *required_size);
+    g_pending_import_source.clear();
+    g_pending_import_path.clear();
     rpcs3::ios::set_core_last_error({});
     return RPCS3_IOS_CORE_SUCCESS;
 }
