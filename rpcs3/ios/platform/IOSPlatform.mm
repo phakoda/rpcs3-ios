@@ -318,9 +318,17 @@ UIViewController* active_presenter()
     }
     return nil;
 }
+}
 
 @interface RPCS3PlatformObserver : NSObject
 @end
+
+@interface RPCS3ImportDelegate : NSObject <UIDocumentPickerDelegate>
+- (instancetype)initWithCallback:(rpcs3::ios::import_callback)callback;
+@end
+
+static RPCS3PlatformObserver* g_observer = nil;
+static NSMutableSet<RPCS3ImportDelegate*>* g_import_delegates = nil;
 
 @implementation RPCS3PlatformObserver
 - (instancetype)init
@@ -356,25 +364,25 @@ UIViewController* active_presenter()
 - (void)willResignActive:(NSNotification*)notification
 {
     (void)notification;
-    invoke_callback(&lifecycle_callbacks::will_resign_active);
+    invoke_callback(&rpcs3::ios::lifecycle_callbacks::will_resign_active);
 }
 
 - (void)didBecomeActive:(NSNotification*)notification
 {
     (void)notification;
-    invoke_callback(&lifecycle_callbacks::did_become_active);
+    invoke_callback(&rpcs3::ios::lifecycle_callbacks::did_become_active);
 }
 
 - (void)didEnterBackground:(NSNotification*)notification
 {
     (void)notification;
-    invoke_callback(&lifecycle_callbacks::did_enter_background);
+    invoke_callback(&rpcs3::ios::lifecycle_callbacks::did_enter_background);
 }
 
 - (void)willEnterForeground:(NSNotification*)notification
 {
     (void)notification;
-    invoke_callback(&lifecycle_callbacks::will_enter_foreground);
+    invoke_callback(&rpcs3::ios::lifecycle_callbacks::will_enter_foreground);
 }
 
 - (void)audioInterrupted:(NSNotification*)notification
@@ -382,11 +390,11 @@ UIViewController* active_presenter()
     NSNumber* type = notification.userInfo[AVAudioSessionInterruptionTypeKey];
     if (type.unsignedIntegerValue == AVAudioSessionInterruptionTypeBegan)
     {
-        invoke_callback(&lifecycle_callbacks::audio_interruption_began);
+        invoke_callback(&rpcs3::ios::lifecycle_callbacks::audio_interruption_began);
     }
     else
     {
-        invoke_callback(&lifecycle_callbacks::audio_interruption_ended);
+        invoke_callback(&rpcs3::ios::lifecycle_callbacks::audio_interruption_ended);
     }
 }
 
@@ -400,17 +408,9 @@ UIViewController* active_presenter()
 - (void)controllerChanged:(NSNotification*)notification
 {
     (void)notification;
-    invoke_callback(&lifecycle_callbacks::controller_configuration_changed);
+    invoke_callback(&rpcs3::ios::lifecycle_callbacks::controller_configuration_changed);
 }
 @end
-
-RPCS3PlatformObserver* g_observer = nil;
-
-@interface RPCS3ImportDelegate : NSObject <UIDocumentPickerDelegate>
-- (instancetype)initWithCallback:(rpcs3::ios::import_callback)callback;
-@end
-
-NSMutableSet<RPCS3ImportDelegate*>* g_import_delegates = nil;
 
 @implementation RPCS3ImportDelegate
 {
@@ -465,7 +465,6 @@ NSMutableSet<RPCS3ImportDelegate*>* g_import_delegates = nil;
     [self finishWithPaths:{} error:{}];
 }
 @end
-}
 
 namespace rpcs3::ios
 {
