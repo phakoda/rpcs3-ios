@@ -25,6 +25,10 @@ find_library(COREVIDEO_FRAMEWORK CoreVideo REQUIRED)
 
 add_executable(rpcs3_ios_bootstrap MACOSX_BUNDLE
     main.mm
+    IOSBootstrapViewController.h
+    IOSBootstrapViewController.mm
+    IOSVulkanProbe.h
+    IOSVulkanProbe.mm
 )
 
 target_compile_features(rpcs3_ios_bootstrap PRIVATE cxx_std_20)
