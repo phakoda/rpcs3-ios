@@ -43,18 +43,19 @@ The `rpcs3_ios_core` aggregate requires:
 
 1. a low-level force-loaded Mach-O link artifact;
 2. `RPCS3Core.framework`, which whole-archives the adapted `rpcs3_emu` target behind a stable C module;
-3. a UIKit consumer app that imports only `RPCS3Core.h` and embeds the framework.
+3. a UIKit consumer app that imports only `RPCS3Core.h`, embeds the framework, and supplies a CAMetalLayer-backed render view.
 
 The framework source graph includes:
 
 - generated iOS filesystem and JIT memory adaptations;
 - the real RPCS3 `Emulator` lifecycle object;
-- headless boot, restart, pause, resume, stop, state, event, title, title-ID, and boot-path APIs;
+- boot, restart, pause, resume, stop, state, event, title, title-ID, and boot-path APIs;
 - security-scoped import APIs;
 - a generated Qt-free `pad_thread` with native GameController and null unsupported handlers;
 - Cubeb audio with a null fallback;
-- Null RSX output until a native renderer host is attached;
-- sandbox, JIT, performance, controller, and diagnostics services;
+- a host-owned `UIView`/`CAMetalLayer` GS frame that selects `VKGSRender` when attached;
+- `NullGSRender` fallback when no render view is attached;
+- sandbox, JIT, performance, lifecycle, controller, and diagnostics services;
 - an explicit Clang module map, exported-symbol list, hidden internal visibility, and linker map.
 
 The small `rpcs3_ios_core_archive` target is a dependency wrapper. It is not advertised as a standalone monolithic archive. `RPCS3Core.framework` and `RPCS3Core.xcframework` are the supported embedding products.
@@ -72,9 +73,10 @@ The frontend remains the last stage because Qt Widgets, desktop dialogs, and per
 `RPCS3Core.h` is a C-compatible, module-importable public boundary. It exposes:
 
 - initialization and ordered shutdown;
+- host render-view attachment, clearing, and status;
 - main-queue event delivery;
 - import into `Documents/Imports`;
-- headless boot and restart results matching RPCS3's current `game_boot_result` values;
+- boot and restart results matching RPCS3's current `game_boot_result` values;
 - pause, resume, stop, and state queries;
 - title, title ID, and boot path;
 - sandbox paths;
@@ -82,9 +84,11 @@ The frontend remains the last stage because Qt Widgets, desktop dialogs, and per
 - diagnostics and last-error strings;
 - public MoltenVK default configuration.
 
+The render view must be a live `UIView` whose backing layer is `CAMetalLayer`. It may be changed only while emulation is stopped. The framework configures `framebufferOnly`, `contentsScale`, and `drawableSize`, retains the view while attached, and integrates the touch overlay.
+
 The two-call import buffer contract caches the completed copy so requesting the required output size does not import the same item twice.
 
-The framework consumer application can select a file or folder, import it through the public API, request a headless boot, and drive lifecycle controls. Its current renderer callback creates `NullGSRender`; it is not a game-display frontend.
+The framework consumer application can select a file or folder, import it through the public API, attach its Metal view, request a boot, and drive lifecycle controls. Actual frame presentation and workload compatibility remain unproven without an Apple build and legal workload.
 
 ## Link architecture
 
@@ -125,8 +129,8 @@ Feature-disabled interface targets remain only for code paths guarded out of the
 
 The shared iOS compatibility policy constrains persisted settings to linked backends:
 
-- Vulkan is the normal mobile renderer configuration;
-- the core framework uses Null RSX output until a native renderer host exists;
+- Vulkan is selected when a valid core render view is attached;
+- Null RSX is the fallback when no render host is present;
 - LLVM selections fall back when a target LLVM package is not enabled;
 - x86 AsmJit SPU recompilation falls back on Apple arm64;
 - camera, microphone, PS Move, host MIDI, and raw desktop mouse capture are disabled or replaced with null/basic handlers.
@@ -140,12 +144,13 @@ The policy is applied by both `RPCS3Core.framework` and the full frontend runtim
 | Sandbox paths | `IOSPlatform.mm` | Application Support, Caches, Documents, Imports, and temporary paths are exposed. |
 | Files | `IOSPlatform.mm`, `RPCS3Core.mm`, `IOSRuntimeIntegration.cpp` | Coordinated security-scoped imports are copied into `Documents/Imports`. |
 | Audio | `IOSPlatform.mm`, `IOSCoreEmulator.mm` | AVAudioSession policy and Cubeb/null backend selection are present. |
-| Lifecycle | `IOSCoreEmulator.mm`, `IOSRuntimeIntegration.cpp` | Core C lifecycle and full-app inactive/interruption pause reasons are implemented. |
+| Lifecycle | `IOSCoreLifecycle.cpp`, `IOSCoreEmulator.mm`, `IOSRuntimeIntegration.cpp` | Inactive and audio pause reasons are tracked independently; only framework-initiated pauses are resumed. |
 | JIT | `IOSJIT.mm`, `IOSJITProvider.mm` | Entitlement/debugger reporting, dual mappings, cache publication, public provider requests, and polling are present. |
 | Core JIT transitions | `PatchCoreSources.cmake` | RPCS3 WX/RX changes call Apple's thread-local write barrier and clear the instruction cache. |
 | Controllers | `IOSControllerFeatures.mm`, `IOSControllerLight.mm` | Stable slots, motion, battery, persistent haptics, and light output are exposed. |
 | Pad backend | `ios_gamecontroller_pad_handler.*`, generated `pad_thread` | Native PS3 mapping, sensors, rumble, lights, and core/full factories are present. |
-| Touch input | `IOSTouchController.mm`, `IOSVirtualController.cpp` | The full renderer view can host a native touch overlay. |
+| Touch input | `IOSTouchController.mm`, `IOSVirtualController.cpp`, `IOSCoreGSFrame.mm` | Core and full renderer views can host the native touch overlay. |
+| Core renderer host | `IOSCoreGSFrame.mm`, `IOSCoreEmulator.mm` | A host CAMetalLayer view is adapted to `GSFrameBase`; Vulkan or Null RSX is selected before boot. |
 | Performance | `IOSPerformance.mm` | Thermal, Low Power Mode, physical/available memory, and memory pressure are exposed. |
 | Displays | `IOSExternalDisplay.mm` | Screen connection and mode information are monitored. Render migration remains open. |
 | MoltenVK | `IOSMoltenVK.mm` | Only public mobile configuration is used. |
@@ -156,7 +161,7 @@ The policy is applied by both `RPCS3Core.framework` and the full frontend runtim
 
 The native handler exposes `iOS Controller 1`, `iOS Controller 2`, and so on.
 
-Connected controllers are compacted into stable logical order after connection changes. Hardware devices occupy the first logical slots; the full frontend's touch controller becomes Player 1 only when no hardware controller is connected.
+Connected controllers are compacted into stable logical order after connection changes. Hardware devices occupy the first logical slots; the touch controller becomes Player 1 only when no hardware controller is connected.
 
 Face buttons map by physical position:
 
@@ -201,9 +206,11 @@ LLVM remains optional and disabled by default. A target LLVM package does not gr
 
 Vulkan through MoltenVK is the supported mobile renderer path. Desktop OpenGL is disabled.
 
-Bootstrap and full renderer paths use `VK_EXT_metal_surface`. The old `VK_MVK_ios_surface` path is not used.
+Bootstrap, core-host, and full renderer paths use `VK_EXT_metal_surface`. The old `VK_MVK_ios_surface` path is not used.
 
-The core framework currently initializes the real emulator with Null RSX output. Connecting RPCS3's renderer lifecycle to a host-owned UIKit/Metal view remains a separate evidence and implementation gate.
+`RPCS3Core.framework` accepts a host-owned CAMetalLayer-backed UIView. `IOSCoreGSFrame` adapts it to RPCS3's `GSFrameBase`, reports drawable dimensions and refresh rate, and lets `VKGSRender` obtain the native Metal surface handle. If no host view is attached, the core falls back to `NullGSRender`.
+
+Actual Vulkan feature compatibility, swapchain behavior, frame presentation, rotation, backgrounding, and RSX workload behavior remain evidence gates.
 
 ## Packaging and validation tools
 
@@ -212,13 +219,13 @@ The core framework currently initializes the real emulator with Null RSX output.
 - `build_llvm.sh`: native tablegen plus static target LLVM build;
 - `validate_environment.sh`: architecture and Mach-O platform checks;
 - `validate_sources.py`: general host-independent source/plist/patch contracts;
-- `validate_core.py`: public API/export parity, whole-archive graph, generated input, compatibility ABI, and package contracts;
+- `validate_core.py`: public API/export parity, whole-archive graph, renderer host, lifecycle, generated input, compatibility ABI, and package contracts;
 - `archive.sh`: app archive/IPA-shaped package and core framework extraction;
 - `create_core_xcframework.sh`: device/simulator `RPCS3Core.xcframework` creation;
 - `report_signing.sh`: effective entitlement reporting;
 - `deploy.sh`: simulator or CoreDevice install and launch.
 
-The GitHub iOS source workflow runs Bash syntax, general contracts, and core contracts. These checks do not invoke Xcode.
+The GitHub iOS source workflow runs Bash syntax, general contracts, and core contracts and uploads complete diagnostics. These checks do not invoke Xcode.
 
 ## Evidence gates still open
 
@@ -228,11 +235,11 @@ Source work cannot honestly eliminate these without an Apple build/runtime envir
 2. compile every selected dependency;
 3. compile and final-link the low-level artifact, framework, and framework-consumer app;
 4. load the framework and invoke every public API;
-5. install legal firmware and prove a legal headless boot;
+5. install legal firmware and prove a legal boot;
 6. prove PPU/SPU interpreter behavior;
 7. prove or reject LLVM recompilers under each supported signing/JIT provider model;
 8. validate MoltenVK features against real RSX workloads;
-9. connect a native renderer host and present frames;
+9. prove actual frame presentation through the core render host;
 10. validate rotation, backgrounding, external displays, audio routes, controllers, touch, haptics, motion, lights, memory pressure, and thermal behavior;
 11. resolve remaining Qt frontend and desktop-dialog assumptions;
 12. establish repeatable physical-device and vphone workflows.
