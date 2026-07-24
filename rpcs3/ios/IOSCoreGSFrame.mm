@@ -40,6 +40,29 @@ void run_on_main_async(dispatch_block_t block)
     }
 }
 
+CGFloat scale_for_view(UIView* view)
+{
+    UIScreen* screen = view.window.screen ?: UIScreen.mainScreen;
+    return std::max<CGFloat>(screen.nativeScale, 1.0);
+}
+
+void update_metal_drawable(UIView* view)
+{
+    if (!view || ![view.layer isKindOfClass:CAMetalLayer.class])
+    {
+        return;
+    }
+
+    CAMetalLayer* layer = (CAMetalLayer*)view.layer;
+    const CGFloat scale = scale_for_view(view);
+    layer.framebufferOnly = NO;
+    layer.opaque = YES;
+    layer.contentsScale = scale;
+    layer.drawableSize = CGSizeMake(
+        std::max<CGFloat>(view.bounds.size.width * scale, 1.0),
+        std::max<CGFloat>(view.bounds.size.height * scale, 1.0));
+}
+
 class ios_core_gs_frame final : public GSFrameBase
 {
 public:
@@ -56,37 +79,30 @@ public:
 
     void reset() override
     {
-        run_on_main_async(^{
-            CAMetalLayer* layer = [m_view.layer isKindOfClass:CAMetalLayer.class]
-                ? (CAMetalLayer*)m_view.layer : nil;
-            if (layer)
-            {
-                const CGFloat scale = m_view.window.screen.nativeScale ?: UIScreen.mainScreen.nativeScale;
-                layer.contentsScale = scale;
-                layer.drawableSize = CGSizeMake(
-                    std::max<CGFloat>(m_view.bounds.size.width * scale, 1.0),
-                    std::max<CGFloat>(m_view.bounds.size.height * scale, 1.0));
-            }
-        });
+        __strong UIView* view = m_view;
+        run_on_main_async(^{ update_metal_drawable(view); });
     }
 
     bool shown() override
     {
+        __strong UIView* view = m_view;
         __block bool visible = false;
         run_on_main_sync(^{
-            visible = m_view && !m_view.hidden && m_view.window != nil;
+            visible = view && !view.hidden && view.window != nil;
         });
         return visible;
     }
 
     void hide() override
     {
-        run_on_main_async(^{ m_view.hidden = YES; });
+        __strong UIView* view = m_view;
+        run_on_main_async(^{ view.hidden = YES; });
     }
 
     void show() override
     {
-        run_on_main_async(^{ m_view.hidden = NO; });
+        __strong UIView* view = m_view;
+        run_on_main_async(^{ view.hidden = NO; });
     }
 
     void toggle_fullscreen() override
@@ -118,29 +134,30 @@ public:
 
     int client_width() override
     {
+        __strong UIView* view = m_view;
         __block int width = 1;
         run_on_main_sync(^{
-            const CGFloat scale = m_view.window.screen.nativeScale ?: UIScreen.mainScreen.nativeScale;
-            width = std::max(1, static_cast<int>(m_view.bounds.size.width * scale));
+            width = std::max(1, static_cast<int>(view.bounds.size.width * scale_for_view(view)));
         });
         return width;
     }
 
     int client_height() override
     {
+        __strong UIView* view = m_view;
         __block int height = 1;
         run_on_main_sync(^{
-            const CGFloat scale = m_view.window.screen.nativeScale ?: UIScreen.mainScreen.nativeScale;
-            height = std::max(1, static_cast<int>(m_view.bounds.size.height * scale));
+            height = std::max(1, static_cast<int>(view.bounds.size.height * scale_for_view(view)));
         });
         return height;
     }
 
     f64 client_display_rate() override
     {
+        __strong UIView* view = m_view;
         __block f64 rate = 60.0;
         run_on_main_sync(^{
-            UIScreen* screen = m_view.window.screen ?: UIScreen.mainScreen;
+            UIScreen* screen = view.window.screen ?: UIScreen.mainScreen;
             rate = std::max<NSInteger>(screen.maximumFramesPerSecond, 20);
         });
         return rate;
@@ -208,14 +225,7 @@ bool set_core_render_view(void* native_view, std::string* error)
         valid = [view isKindOfClass:UIView.class] && [view.layer isKindOfClass:CAMetalLayer.class];
         if (valid)
         {
-            CAMetalLayer* layer = (CAMetalLayer*)view.layer;
-            layer.framebufferOnly = NO;
-            layer.opaque = YES;
-            const CGFloat scale = view.window.screen.nativeScale ?: UIScreen.mainScreen.nativeScale;
-            layer.contentsScale = scale;
-            layer.drawableSize = CGSizeMake(
-                std::max<CGFloat>(view.bounds.size.width * scale, 1.0),
-                std::max<CGFloat>(view.bounds.size.height * scale, 1.0));
+            update_metal_drawable(view);
         }
     });
 
@@ -228,13 +238,16 @@ bool set_core_render_view(void* native_view, std::string* error)
         return false;
     }
 
+    __strong UIView* previous_view = nil;
     {
         std::lock_guard lock(g_render_view_mutex);
-        if (g_render_view && g_render_view != view)
-        {
-            detach_touch_controller_overlay((__bridge void*)g_render_view);
-        }
+        previous_view = g_render_view;
         g_render_view = view;
+    }
+
+    if (previous_view && previous_view != view)
+    {
+        detach_touch_controller_overlay((__bridge void*)previous_view);
     }
     attach_touch_controller_overlay((__bridge void*)view);
     return true;
