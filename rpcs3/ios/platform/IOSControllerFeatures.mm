@@ -6,12 +6,15 @@
 #import <UIKit/UIKit.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <mutex>
 
 namespace
 {
 using namespace rpcs3::ios;
+constexpr float radians_to_degrees = 57.29577951308232f;
+constexpr std::size_t gamecontroller_player_slots = 4;
 
 controller_battery_state convert_battery_state(GCDeviceBatteryState state)
 {
@@ -30,10 +33,54 @@ NSArray<GCController*>* hardware_controllers()
     return GCController.controllers;
 }
 
-GCController* controller_at_index(std::size_t index)
+void normalize_controller_slots()
 {
     NSArray<GCController*>* controllers = hardware_controllers();
-    return index < controllers.count ? controllers[index] : nil;
+    std::array<bool, gamecontroller_player_slots> used{};
+    NSMutableArray<GCController*>* unassigned = [NSMutableArray array];
+
+    for (GCController* controller in controllers)
+    {
+        const NSInteger player = controller.playerIndex;
+        if (player >= 0 && static_cast<std::size_t>(player) < used.size() && !used[static_cast<std::size_t>(player)])
+        {
+            used[static_cast<std::size_t>(player)] = true;
+        }
+        else
+        {
+            controller.playerIndex = GCControllerPlayerIndexUnset;
+            [unassigned addObject:controller];
+        }
+    }
+
+    std::size_t next_slot = 0;
+    for (GCController* controller in unassigned)
+    {
+        while (next_slot < used.size() && used[next_slot])
+        {
+            ++next_slot;
+        }
+        if (next_slot >= used.size())
+        {
+            break;
+        }
+        controller.playerIndex = static_cast<GCControllerPlayerIndex>(next_slot);
+        used[next_slot++] = true;
+    }
+}
+
+GCController* controller_at_index(std::size_t index)
+{
+    normalize_controller_slots();
+    for (GCController* controller in hardware_controllers())
+    {
+        if (controller.playerIndex != GCControllerPlayerIndexUnset &&
+            static_cast<std::size_t>(controller.playerIndex) == index)
+        {
+            return controller;
+        }
+    }
+    return nil;
 }
 
 @interface RPCS3HapticDriver : NSObject
@@ -65,7 +112,6 @@ GCController* controller_at_index(std::size_t index)
         if (strong_self)
         {
             strong_self->_started = NO;
-            [strong_self setLowFrequency:0.0f highFrequency:0.0f];
         }
     };
     _engine.stoppedHandler = ^(CHHapticEngineStoppedReason reason)
@@ -146,13 +192,17 @@ GCController* controller_at_index(std::size_t index)
 
 - (BOOL)setLowFrequency:(float)low highFrequency:(float)high
 {
+    low = std::clamp(low, 0.0f, 1.0f);
+    high = std::clamp(high, 0.0f, 1.0f);
+    if (low <= 0.0f && high <= 0.0f && !_started)
+    {
+        return YES;
+    }
     if (![self startIfNeeded])
     {
         return NO;
     }
 
-    low = std::clamp(low, 0.0f, 1.0f);
-    high = std::clamp(high, 0.0f, 1.0f);
     CHHapticDynamicParameter* low_parameter = [[CHHapticDynamicParameter alloc]
         initWithParameterID:CHHapticDynamicParameterIDHapticIntensityControl value:low relativeTime:0.0];
     CHHapticDynamicParameter* high_parameter = [[CHHapticDynamicParameter alloc]
@@ -165,6 +215,10 @@ GCController* controller_at_index(std::size_t index)
 
 - (void)stop
 {
+    if (!_started)
+    {
+        return;
+    }
     NSError* error = nil;
     [_low_player stopAtTime:CHHapticTimeImmediate error:&error];
     [_high_player stopAtTime:CHHapticTimeImmediate error:&error];
@@ -240,9 +294,9 @@ controller_motion_state remap_device_motion(CMDeviceMotion* motion)
     const float raw_accel_x = -static_cast<float>(motion.gravity.x + motion.userAcceleration.x);
     const float raw_accel_y = -static_cast<float>(motion.gravity.y + motion.userAcceleration.y);
     const float raw_accel_z = -static_cast<float>(motion.gravity.z + motion.userAcceleration.z);
-    const float raw_gyro_x = static_cast<float>(motion.rotationRate.x) * 180.0f / static_cast<float>(M_PI);
-    const float raw_gyro_y = -static_cast<float>(motion.rotationRate.y) * 180.0f / static_cast<float>(M_PI);
-    const float raw_gyro_z = -static_cast<float>(motion.rotationRate.z) * 180.0f / static_cast<float>(M_PI);
+    const float raw_gyro_x = static_cast<float>(motion.rotationRate.x) * radians_to_degrees;
+    const float raw_gyro_y = -static_cast<float>(motion.rotationRate.y) * radians_to_degrees;
+    const float raw_gyro_z = -static_cast<float>(motion.rotationRate.z) * radians_to_degrees;
 
     result.available = true;
     switch (UIDevice.currentDevice.orientation)
@@ -278,6 +332,11 @@ controller_motion_state remap_device_motion(CMDeviceMotion* motion)
 
 namespace rpcs3::ios::detail
 {
+void normalize_hardware_controller_slots()
+{
+    normalize_controller_slots();
+}
+
 controller_capabilities get_hardware_controller_capabilities(std::size_t index)
 {
     controller_capabilities result;
@@ -314,9 +373,9 @@ controller_motion_state get_hardware_controller_motion(std::size_t index)
     result.acceleration_x = -static_cast<float>(motion.acceleration.x);
     result.acceleration_y = -static_cast<float>(motion.acceleration.z);
     result.acceleration_z = static_cast<float>(motion.acceleration.y);
-    result.gyro_x = static_cast<float>(motion.rotationRate.x) * 180.0f / static_cast<float>(M_PI);
-    result.gyro_y = static_cast<float>(motion.rotationRate.z) * 180.0f / static_cast<float>(M_PI);
-    result.gyro_z = -static_cast<float>(motion.rotationRate.y) * 180.0f / static_cast<float>(M_PI);
+    result.gyro_x = static_cast<float>(motion.rotationRate.x) * radians_to_degrees;
+    result.gyro_y = static_cast<float>(motion.rotationRate.z) * radians_to_degrees;
+    result.gyro_z = -static_cast<float>(motion.rotationRate.y) * radians_to_degrees;
     return result;
 }
 
