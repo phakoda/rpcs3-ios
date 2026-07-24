@@ -81,12 +81,26 @@ ios_gamecontroller_pad_handler::ios_gamecontroller_pad_handler()
 
     b_has_config = true;
     b_has_deadzones = true;
-    b_has_rumble = false;
-    b_has_motion = false;
+    b_has_rumble = true;
+    b_has_motion = true;
+    b_has_battery = true;
+    b_has_orientation = true;
     b_has_pressure_intensity_button = false;
     b_has_analog_limiter_button = false;
 
     init_configs();
+}
+
+ios_gamecontroller_pad_handler::~ios_gamecontroller_pad_handler()
+{
+    for (const auto& [name, device] : m_devices)
+    {
+        (void)name;
+        if (device && device->controller_index != umax)
+        {
+            rpcs3::ios::set_combined_controller_rumble(device->controller_index, 0.0f, 0.0f);
+        }
+    }
 }
 
 bool ios_gamecontroller_pad_handler::Init()
@@ -131,8 +145,6 @@ std::vector<pad_list_entry> ios_gamecontroller_pad_handler::list_devices()
         devices.emplace_back(device_name(index), false);
     }
 
-    // Keep a stable first device available in configuration UIs even before a
-    // controller is connected. The connection state will remain disconnected.
     if (devices.empty())
     {
         devices.emplace_back(device_name(0), false);
@@ -147,9 +159,9 @@ void ios_gamecontroller_pad_handler::init_config(cfg_pad* cfg)
         return;
     }
 
-    // Apple labels face buttons by physical position. Map them to the matching
-    // PlayStation layout rather than matching the letters printed by Xbox-style
-    // controllers: bottom=A/Cross, left=X/Square, right=B/Circle, top=Y/Triangle.
+    // GameController labels face buttons by physical position. The physical
+    // mapping matches PlayStation layout: bottom/cross, right/circle,
+    // left/square, top/triangle.
     cfg->cross.def = ::at32(button_list, key_a);
     cfg->circle.def = ::at32(button_list, key_b);
     cfg->square.def = ::at32(button_list, key_x);
@@ -186,6 +198,39 @@ void ios_gamecontroller_pad_handler::init_config(cfg_pad* cfg)
     cfg->ltriggerthreshold.def = 0;
     cfg->rtriggerthreshold.def = 0;
     cfg->from_default();
+}
+
+u32 ios_gamecontroller_pad_handler::get_battery_level(const std::string& pad_id)
+{
+    usz index = 0;
+    if (!parse_device_index(pad_id, &index))
+    {
+        return 0;
+    }
+
+    const auto capabilities = rpcs3::ios::get_combined_controller_capabilities(index);
+    if (!capabilities.has_battery || capabilities.battery_level < 0.0f)
+    {
+        return 0;
+    }
+    return static_cast<u32>(std::clamp(std::lround(capabilities.battery_level * 100.0f), 0l, 100l));
+}
+
+pad_capabilities ios_gamecontroller_pad_handler::get_capabilities(const std::string& pad_id)
+{
+    usz index = 0;
+    rpcs3::ios::controller_capabilities native_capabilities;
+    if (parse_device_index(pad_id, &index))
+    {
+        native_capabilities = rpcs3::ios::get_combined_controller_capabilities(index);
+    }
+
+    pad_capabilities result;
+    result.has_rumble = native_capabilities.has_haptics;
+    result.has_accel = native_capabilities.has_motion;
+    result.has_gyro = native_capabilities.has_motion;
+    result.has_pressure_intensity_button = false;
+    return result;
 }
 
 std::array<std::vector<std::set<u32>>, PadHandlerBase::button::button_count>
@@ -265,12 +310,78 @@ PadHandlerBase::connection ios_gamecontroller_pad_handler::update_connection(con
         return connection::disconnected;
     }
 
-    const auto controllers = rpcs3::ios::get_combined_controller_states();
-    if (controller->controller_index >= controllers.size())
+    rpcs3::ios::controller_state state;
+    if (!rpcs3::ios::get_combined_controller_state(controller->controller_index, &state))
     {
         return connection::disconnected;
     }
-    return controllers[controller->controller_index].connected ? connection::connected : connection::disconnected;
+    return state.connected ? connection::connected : connection::disconnected;
+}
+
+void ios_gamecontroller_pad_handler::get_extended_info(const pad_ensemble& binding)
+{
+    const auto* controller = static_cast<const ios_device*>(binding.device.get());
+    const auto& pad = binding.pad;
+    if (!controller || !pad)
+    {
+        return;
+    }
+
+    const auto capabilities = rpcs3::ios::get_combined_controller_capabilities(controller->controller_index);
+    if (capabilities.has_battery && capabilities.battery_level >= 0.0f)
+    {
+        pad->m_battery_level = static_cast<u32>(std::clamp(std::lround(capabilities.battery_level * 10.0f), 0l, 10l));
+        pad->m_cable_state = capabilities.battery_state == rpcs3::ios::controller_battery_state::charging ||
+            capabilities.battery_state == rpcs3::ios::controller_battery_state::full;
+    }
+
+    const auto motion = rpcs3::ios::get_combined_controller_motion(controller->controller_index);
+    if (!motion.available)
+    {
+        return;
+    }
+
+    pad->m_sensors[0].m_value = Clamp0To1023(motion.acceleration_x * MOTION_ONE_G + 512.0f);
+    pad->m_sensors[1].m_value = Clamp0To1023(motion.acceleration_y * MOTION_ONE_G + 512.0f);
+    pad->m_sensors[2].m_value = Clamp0To1023(motion.acceleration_z * MOTION_ONE_G + 512.0f);
+    pad->m_sensors[3].m_value = Clamp0To1023(motion.gyro_y * (123.0f / 90.0f) + 512.0f);
+    set_raw_orientation(pad->move_data,
+        motion.acceleration_x,
+        motion.acceleration_y,
+        motion.acceleration_z,
+        motion.gyro_x,
+        motion.gyro_y,
+        motion.gyro_z);
+}
+
+void ios_gamecontroller_pad_handler::apply_pad_data(const pad_ensemble& binding)
+{
+    auto* controller = static_cast<ios_device*>(binding.device.get());
+    const auto& pad = binding.pad;
+    if (!controller || !controller->config || !pad)
+    {
+        return;
+    }
+
+    const u8 large_motor = controller->config->get_large_motor_speed(pad->m_vibrate_motors);
+    const u8 small_motor = controller->config->get_small_motor_speed(pad->m_vibrate_motors);
+    const auto now = steady_clock::now();
+    const bool changed = controller->large_motor != large_motor || controller->small_motor != small_motor;
+    if (!changed && now - controller->last_output < min_output_interval)
+    {
+        return;
+    }
+
+    if (rpcs3::ios::set_combined_controller_rumble(
+            controller->controller_index,
+            large_motor / 255.0f,
+            small_motor / 255.0f))
+    {
+        controller->large_motor = large_motor;
+        controller->small_motor = small_motor;
+        controller->last_output = now;
+        controller->new_output_data = false;
+    }
 }
 
 std::unordered_map<u32, u16> ios_gamecontroller_pad_handler::get_button_values(const std::shared_ptr<PadDevice>& device)
@@ -288,13 +399,12 @@ std::unordered_map<u32, u16> ios_gamecontroller_pad_handler::get_button_values(c
         return values;
     }
 
-    const auto controllers = rpcs3::ios::get_combined_controller_states();
-    if (controller->controller_index >= controllers.size())
+    rpcs3::ios::controller_state state;
+    if (!rpcs3::ios::get_combined_controller_state(controller->controller_index, &state))
     {
         return values;
     }
 
-    const rpcs3::ios::controller_state& state = controllers[controller->controller_index];
     values[key_dpad_up] = button_value(state.dpad_up);
     values[key_dpad_down] = button_value(state.dpad_down);
     values[key_dpad_left] = button_value(state.dpad_left);
