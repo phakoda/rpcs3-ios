@@ -60,41 +60,65 @@ if(TARGET rpcs3_emu)
     target_sources(rpcs3_emu PRIVATE "${_vm_generated}")
 endif()
 
-# A static archive can hide unresolved references until a later application
-# target consumes it. The core milestone therefore includes a small UIKit app
-# that force-loads every object from rpcs3_emu and performs a complete final
-# link against its transitive dependency graph. Building rpcs3_ios_core now
-# necessarily builds this application target as well as the reusable archive.
-if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_link)
-    add_executable(rpcs3_ios_core_link MACOSX_BUNDLE
-        "${CMAKE_SOURCE_DIR}/rpcs3/ios/CoreLinkMain.mm"
+# Build the adapted core in three forms:
+#
+# 1. rpcs3_ios_core_archive is a reusable static archive milestone.
+# 2. RPCS3Core.framework force-loads every rpcs3_emu object and resolves the
+#    complete dependency/framework closure behind a stable C ABI.
+# 3. RPCS3 iOS Core.app imports only that public C ABI, proving a consumer can
+#    link the framework without reaching into RPCS3 internals.
+if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_framework)
+    add_library(rpcs3_ios_core_framework SHARED
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.mm"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/CoreAnchor.cpp")
+    target_compile_features(rpcs3_ios_core_framework PRIVATE cxx_std_23)
+    target_include_directories(rpcs3_ios_core_framework PUBLIC
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios")
+    target_link_options(rpcs3_ios_core_framework PRIVATE "-ObjC")
+    target_link_libraries(rpcs3_ios_core_framework PRIVATE
+        "$<LINK_LIBRARY:WHOLE_ARCHIVE,rpcs3_emu>"
+        rpcs3_ios_platform
+        3rdparty::ios_system)
+    set_target_properties(rpcs3_ios_core_framework PROPERTIES
+        OUTPUT_NAME "RPCS3Core"
+        FRAMEWORK TRUE
+        FRAMEWORK_VERSION A
+        VERSION 0.1.0
+        SOVERSION 0.1
+        PUBLIC_HEADER "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.h"
+        MACOSX_FRAMEWORK_IDENTIFIER "net.rpcs3.ios.core"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core-Info.plist.in"
+        XCODE_ATTRIBUTE_CLANG_ENABLE_MODULES YES
+        XCODE_ATTRIBUTE_DEFINES_MODULE YES
+        XCODE_ATTRIBUTE_ENABLE_BITCODE NO
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "net.rpcs3.ios.core"
+        XCODE_ATTRIBUTE_SKIP_INSTALL NO)
 
+    add_executable(rpcs3_ios_core_link MACOSX_BUNDLE
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/CoreLinkMain.mm")
     target_compile_features(rpcs3_ios_core_link PRIVATE cxx_std_23)
+    target_include_directories(rpcs3_ios_core_link PRIVATE
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios")
     target_link_options(rpcs3_ios_core_link PRIVATE "-ObjC")
     target_link_libraries(rpcs3_ios_core_link PRIVATE
-        "$<LINK_LIBRARY:WHOLE_ARCHIVE,rpcs3_emu>"
-        rpcs3_ios_platform)
-
+        rpcs3_ios_core_framework
+        3rdparty::ios_system)
     set_target_properties(rpcs3_ios_core_link PROPERTIES
         OUTPUT_NAME "RPCS3 iOS Core"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/rpcs3/ios/Info.plist.in"
-        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "net.rpcs3.ios.core"
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "net.rpcs3.ios.core.link"
         XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-        XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+        XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED NO
+        XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED NO
         XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "iphoneos iphonesimulator"
         XCODE_ATTRIBUTE_SUPPORTS_MACCATALYST "NO"
-        XCODE_ATTRIBUTE_SKIP_INSTALL "NO")
+        XCODE_ATTRIBUTE_ENABLE_BITCODE NO
+        XCODE_ATTRIBUTE_SKIP_INSTALL YES)
 
-    if(RPCS3_IOS_ENTITLEMENTS_FILE)
-        set_target_properties(rpcs3_ios_core_link PROPERTIES
-            XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${RPCS3_IOS_ENTITLEMENTS_FILE}")
-    elseif(RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS)
-        set_target_properties(rpcs3_ios_core_link PROPERTIES
-            XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_SOURCE_DIR}/rpcs3/ios/JIT.entitlements")
-    endif()
-
-    add_dependencies(rpcs3_ios_core rpcs3_ios_core_link)
+    add_dependencies(rpcs3_ios_core
+        rpcs3_ios_core_framework
+        rpcs3_ios_core_link)
 endif()
 
 if(TARGET rpcs3_ui)
