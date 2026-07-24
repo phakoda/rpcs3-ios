@@ -6,7 +6,6 @@
 #import <UIKit/UIKit.h>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <mutex>
 
@@ -33,54 +32,33 @@ NSArray<GCController*>* hardware_controllers()
     return GCController.controllers;
 }
 
-void normalize_controller_slots()
+NSArray<GCController*>* normalized_controllers()
 {
-    NSArray<GCController*>* controllers = hardware_controllers();
-    std::array<bool, gamecontroller_player_slots> used{};
-    NSMutableArray<GCController*>* unassigned = [NSMutableArray array];
-
-    for (GCController* controller in controllers)
+    NSArray<GCController*>* sorted = [hardware_controllers() sortedArrayUsingComparator:^NSComparisonResult(GCController* lhs, GCController* rhs)
     {
-        const NSInteger player = controller.playerIndex;
-        if (player >= 0 && static_cast<std::size_t>(player) < used.size() && !used[static_cast<std::size_t>(player)])
-        {
-            used[static_cast<std::size_t>(player)] = true;
-        }
-        else
-        {
-            controller.playerIndex = GCControllerPlayerIndexUnset;
-            [unassigned addObject:controller];
-        }
-    }
+        const NSInteger lhs_index = lhs.playerIndex == GCControllerPlayerIndexUnset ? NSIntegerMax : lhs.playerIndex;
+        const NSInteger rhs_index = rhs.playerIndex == GCControllerPlayerIndexUnset ? NSIntegerMax : rhs.playerIndex;
+        if (lhs_index < rhs_index) return NSOrderedAscending;
+        if (lhs_index > rhs_index) return NSOrderedDescending;
+        return NSOrderedSame;
+    }];
 
-    std::size_t next_slot = 0;
-    for (GCController* controller in unassigned)
+    const NSUInteger count = std::min<NSUInteger>(sorted.count, gamecontroller_player_slots);
+    for (NSUInteger index = 0; index < count; ++index)
     {
-        while (next_slot < used.size() && used[next_slot])
-        {
-            ++next_slot;
-        }
-        if (next_slot >= used.size())
-        {
-            break;
-        }
-        controller.playerIndex = static_cast<GCControllerPlayerIndex>(next_slot);
-        used[next_slot++] = true;
+        sorted[index].playerIndex = static_cast<GCControllerPlayerIndex>(index);
     }
+    for (NSUInteger index = count; index < sorted.count; ++index)
+    {
+        sorted[index].playerIndex = GCControllerPlayerIndexUnset;
+    }
+    return sorted;
 }
 
 GCController* controller_at_index(std::size_t index)
 {
-    normalize_controller_slots();
-    for (GCController* controller in hardware_controllers())
-    {
-        if (controller.playerIndex != GCControllerPlayerIndexUnset &&
-            static_cast<std::size_t>(controller.playerIndex) == index)
-        {
-            return controller;
-        }
-    }
-    return nil;
+    NSArray<GCController*>* controllers = normalized_controllers();
+    return index < controllers.count ? controllers[index] : nil;
 }
 
 @interface RPCS3HapticDriver : NSObject
@@ -334,7 +312,7 @@ namespace rpcs3::ios::detail
 {
 void normalize_hardware_controller_slots()
 {
-    normalize_controller_slots();
+    (void)normalized_controllers();
 }
 
 controller_capabilities get_hardware_controller_capabilities(std::size_t index)
