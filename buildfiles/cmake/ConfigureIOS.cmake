@@ -24,12 +24,28 @@ option(RPCS3_IOS_ENABLE_LLVM "Enable LLVM PPU/SPU recompilers for iOS after JIT 
 set(RPCS3_IOS_ENTITLEMENTS_FILE "" CACHE FILEPATH "Custom entitlements for a supported iOS signing environment")
 set(RPCS3_IOS_FFMPEG_ROOT "" CACHE PATH "Root of a static FFmpeg build for the selected iOS SDK")
 set(RPCS3_IOS_FFMPEG_EXTRA_LIBRARIES "" CACHE STRING "Additional libraries required by the selected static FFmpeg build")
+set(RPCS3_IOS_LLVM_ROOT "" CACHE PATH "Install prefix of a static LLVM build for the selected iOS SDK")
 
 if(RPCS3_IOS_ENTITLEMENTS_FILE AND NOT EXISTS "${RPCS3_IOS_ENTITLEMENTS_FILE}")
     message(FATAL_ERROR "RPCS3_IOS_ENTITLEMENTS_FILE does not exist: ${RPCS3_IOS_ENTITLEMENTS_FILE}")
 endif()
-if(RPCS3_IOS_ENABLE_LLVM AND NOT RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS AND NOT RPCS3_IOS_ENTITLEMENTS_FILE)
-    message(WARNING "LLVM was enabled without an entitlement profile. Interpreter fallback may still be required at runtime.")
+
+if(RPCS3_IOS_ENABLE_LLVM)
+    if(RPCS3_IOS_LLVM_ROOT)
+        set(_rpcs3_ios_llvm_config "${RPCS3_IOS_LLVM_ROOT}/lib/cmake/llvm/LLVMConfig.cmake")
+        if(NOT EXISTS "${_rpcs3_ios_llvm_config}")
+            message(FATAL_ERROR
+                "RPCS3_IOS_LLVM_ROOT does not contain lib/cmake/llvm/LLVMConfig.cmake: ${RPCS3_IOS_LLVM_ROOT}")
+        endif()
+        set(LLVM_DIR "${RPCS3_IOS_LLVM_ROOT}/lib/cmake/llvm" CACHE PATH "Target LLVM package for iOS" FORCE)
+    elseif(NOT LLVM_DIR OR NOT EXISTS "${LLVM_DIR}/LLVMConfig.cmake")
+        message(FATAL_ERROR
+            "RPCS3_IOS_ENABLE_LLVM requires RPCS3_IOS_LLVM_ROOT or LLVM_DIR from a static LLVM build for the selected iOS SDK")
+    endif()
+
+    if(NOT RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS AND NOT RPCS3_IOS_ENTITLEMENTS_FILE)
+        message(WARNING "LLVM was enabled without an entitlement profile. Interpreter fallback may still be required at runtime.")
+    endif()
 endif()
 
 set(CMAKE_XCODE_ATTRIBUTE_ENABLE_BITCODE NO)
@@ -66,4 +82,5 @@ message(STATUS "  Deployment target: ${CMAKE_OSX_DEPLOYMENT_TARGET}")
 message(STATUS "  Bootstrap only: ${RPCS3_IOS_BOOTSTRAP_ONLY}")
 message(STATUS "  Qt frontend: ${RPCS3_IOS_BUILD_QT_FRONTEND}")
 message(STATUS "  LLVM/JIT enabled: ${RPCS3_IOS_ENABLE_LLVM}")
+message(STATUS "  LLVM root: ${RPCS3_IOS_LLVM_ROOT}")
 message(STATUS "  Entitlements: ${RPCS3_IOS_ENTITLEMENTS_FILE}")
