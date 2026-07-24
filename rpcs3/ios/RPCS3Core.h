@@ -22,6 +22,7 @@ typedef enum rpcs3_ios_core_result
     RPCS3_IOS_CORE_PLATFORM_ERROR = 4,
     RPCS3_IOS_CORE_BUSY = 5,
     RPCS3_IOS_CORE_UNSUPPORTED = 6,
+    RPCS3_IOS_CORE_BUFFER_TOO_SMALL = 7,
 } rpcs3_ios_core_result;
 
 typedef enum rpcs3_ios_emulator_state
@@ -110,9 +111,20 @@ RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_initialize(void);
 RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_shutdown(void);
 RPCS3_IOS_CORE_EXPORT uint8_t rpcs3_ios_core_is_initialized(void);
 
+// Events are delivered on the UIKit main queue. The caller owns context and
+// must clear the callback before releasing it or unloading the framework host.
 RPCS3_IOS_CORE_EXPORT void rpcs3_ios_core_set_event_callback(
     rpcs3_ios_core_event_callback callback,
     void* context);
+
+// Copies a security-scoped local file or directory into Documents/Imports. The
+// caller must keep any security-scoped URL active for the duration of this call.
+// required_size receives the full UTF-8 path length including the trailing NUL.
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_import_path(
+    const char* source_path,
+    char* imported_path,
+    size_t imported_path_size,
+    size_t* required_size);
 
 RPCS3_IOS_CORE_EXPORT rpcs3_ios_boot_result rpcs3_ios_core_boot_path(
     const char* path,
