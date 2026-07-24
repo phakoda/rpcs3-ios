@@ -62,6 +62,7 @@ public:
     std::vector<pad_list_entry> list_devices() override;
     void init_config(cfg_pad* cfg) override;
     u32 get_battery_level(const std::string& pad_id) override;
+    pad_capabilities get_capabilities(const std::string& pad_id) override;
 
 private:
     std::array<std::vector<std::set<u32>>, PadHandlerBase::button::button_count>
