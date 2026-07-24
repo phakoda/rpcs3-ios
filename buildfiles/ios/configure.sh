@@ -3,14 +3,16 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: bash buildfiles/ios/configure.sh <device|simulator> [bootstrap|full]
+Usage: bash buildfiles/ios/configure.sh <device|simulator> [bootstrap|core|full]
 
 Required environment:
   MOLTENVK_ROOT       Root of an unpacked MoltenVK distribution.
 
-Full-build environment:
+Core/full environment:
   RPCS3_IOS_FFMPEG_ROOT
                       Static FFmpeg prefix from build_ffmpeg.sh.
+
+Full frontend environment:
   Qt6_DIR             Qt iOS kit lib/cmake/Qt6 directory.
   QT_HOST_PATH        Matching macOS Qt host installation.
 
@@ -27,6 +29,11 @@ Optional overrides:
   RPCS3_IOS_FFMPEG_EXTRA_LIBRARIES
                       Semicolon-separated extra static FFmpeg dependencies.
 
+Stages:
+  bootstrap  Native UIKit/MoltenVK/platform-services application.
+  core       rpcs3_emu and portable dependencies, without Qt desktop frontend.
+  full       Core plus the Qt frontend and iOS application bundle.
+
 The helper does not download SDKs, firmware, signing identities, VM state, or
 copyrighted console software.
 EOF
@@ -38,7 +45,7 @@ if [[ "${platform}" != "device" && "${platform}" != "simulator" ]]; then
     usage >&2
     exit 64
 fi
-if [[ "${mode}" != "bootstrap" && "${mode}" != "full" ]]; then
+if [[ "${mode}" != "bootstrap" && "${mode}" != "core" && "${mode}" != "full" ]]; then
     usage >&2
     exit 64
 fi
@@ -115,11 +122,14 @@ if [[ ! -f "${vulkan_library}" ]]; then
     exit 66
 fi
 
-if [[ "${mode}" == "full" ]]; then
+if [[ "${mode}" == "core" || "${mode}" == "full" ]]; then
     if [[ ! -f "${RPCS3_IOS_FFMPEG_ROOT:-}/include/libavcodec/avcodec.h" ]]; then
-        echo "error: full mode requires RPCS3_IOS_FFMPEG_ROOT" >&2
+        echo "error: ${mode} mode requires RPCS3_IOS_FFMPEG_ROOT" >&2
         exit 66
     fi
+fi
+
+if [[ "${mode}" == "full" ]]; then
     if [[ ! -f "${Qt6_DIR:-}/Qt6Config.cmake" ]]; then
         echo "error: full mode requires Qt6_DIR from a Qt iOS kit" >&2
         exit 66
@@ -133,16 +143,20 @@ fi
 sdk_path="$(xcrun --sdk "${sdk}" --show-sdk-path)"
 deployment_target="${IOS_DEPLOYMENT_TARGET:-16.0}"
 bootstrap_only="ON"
+qt_frontend="OFF"
 target="rpcs3_ios_bootstrap"
-if [[ "${mode}" == "full" ]]; then
+if [[ "${mode}" == "core" ]]; then
     bootstrap_only="OFF"
+    target="rpcs3_ios_core"
+elif [[ "${mode}" == "full" ]]; then
+    bootstrap_only="OFF"
+    qt_frontend="ON"
     target="rpcs3"
 fi
 
 export Vulkan_INCLUDE_DIR="${vulkan_include_dir}"
 export Vulkan_LIBRARY="${vulkan_library}"
-export VALIDATE_FULL_BUILD="$([[ "${mode}" == "full" ]] && echo 1 || echo 0)"
-bash "${repo_root}/buildfiles/ios/validate_environment.sh" "${platform}"
+bash "${repo_root}/buildfiles/ios/validate_environment.sh" "${platform}" "${mode}"
 
 cmake_args=(
     -S "${repo_root}"
@@ -153,23 +167,29 @@ cmake_args=(
     -DCMAKE_OSX_ARCHITECTURES=arm64
     -DCMAKE_OSX_DEPLOYMENT_TARGET="${deployment_target}"
     -DRPCS3_IOS_BOOTSTRAP_ONLY="${bootstrap_only}"
+    -DRPCS3_IOS_BUILD_QT_FRONTEND="${qt_frontend}"
     -DRPCS3_IOS_ENABLE_LLVM="${RPCS3_IOS_ENABLE_LLVM:-OFF}"
     -DRPCS3_IOS_ENABLE_JIT_ENTITLEMENTS="${RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS:-OFF}"
     -DVulkan_INCLUDE_DIR="${vulkan_include_dir}"
     -DVulkan_LIBRARY="${vulkan_library}"
 )
 
-if [[ "${mode}" == "full" ]]; then
+if [[ "${mode}" == "core" || "${mode}" == "full" ]]; then
     cmake_args+=(
         -DRPCS3_IOS_FFMPEG_ROOT="${RPCS3_IOS_FFMPEG_ROOT}"
-        -DQt6_DIR="${Qt6_DIR}"
-        -DQT_HOST_PATH="${QT_HOST_PATH}"
     )
     if [[ -n "${RPCS3_IOS_FFMPEG_EXTRA_LIBRARIES:-}" ]]; then
         cmake_args+=(
             -DRPCS3_IOS_FFMPEG_EXTRA_LIBRARIES="${RPCS3_IOS_FFMPEG_EXTRA_LIBRARIES}"
         )
     fi
+fi
+
+if [[ "${mode}" == "full" ]]; then
+    cmake_args+=(
+        -DQt6_DIR="${Qt6_DIR}"
+        -DQT_HOST_PATH="${QT_HOST_PATH}"
+    )
 fi
 
 if [[ -n "${RPCS3_IOS_ENTITLEMENTS_FILE:-}" ]]; then
@@ -190,8 +210,13 @@ cat <<EOF
 Configuration completed.
 Build with:
   cmake --build "${build_dir}" --config Release --target ${target}
+EOF
+
+if [[ "${mode}" != "core" ]]; then
+    cat <<EOF
 
 For device deployment, open:
   ${build_dir}/rpcs3.xcodeproj
 and select your signing team and connected iPhone/iPad.
 EOF
+fi
