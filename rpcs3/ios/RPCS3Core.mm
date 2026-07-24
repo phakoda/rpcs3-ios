@@ -1,6 +1,7 @@
 #include "RPCS3Core.h"
 #include "IOSCoreDefaults.h"
 #include "IOSCoreEmulator.h"
+#include "IOSCoreGSFrame.h"
 #include "platform/IOSPlatform.h"
 
 #include <algorithm>
@@ -58,10 +59,22 @@ void clear_pending_import()
     g_pending_import_path.clear();
 }
 
+bool renderer_mutation_allowed()
+{
+    if (!g_initialized.load())
+    {
+        return true;
+    }
+
+    const rpcs3_ios_emulator_state state = rpcs3_ios_core_emulator_state();
+    return state == RPCS3_IOS_EMULATOR_STOPPED || state == RPCS3_IOS_EMULATOR_UNAVAILABLE;
+}
+
 rpcs3_ios_core_result fail_initialization(std::string error)
 {
     clear_pending_import();
     rpcs3::ios::shutdown_core_emulator();
+    rpcs3::ios::clear_core_render_view();
     rpcs3::ios::stop_all_controller_haptics();
     rpcs3::ios::set_external_display_callback({});
     rpcs3::ios::set_performance_callback({});
@@ -123,9 +136,10 @@ rpcs3_ios_core_result rpcs3_ios_core_shutdown(void)
         return RPCS3_IOS_CORE_NOT_INITIALIZED;
     }
 
-    // Stop guest threads and destroy emulator-owned fixed objects before native
-    // controller, display, audio, and notification services disappear.
+    // Stop guest and renderer threads before releasing their retained UIView,
+    // controller overlay, audio, display, and notification services.
     rpcs3::ios::shutdown_core_emulator();
+    rpcs3::ios::clear_core_render_view();
     rpcs3::ios::stop_all_controller_haptics();
     rpcs3::ios::set_external_display_callback({});
     rpcs3::ios::set_performance_callback({});
@@ -139,6 +153,48 @@ rpcs3_ios_core_result rpcs3_ios_core_shutdown(void)
 uint8_t rpcs3_ios_core_is_initialized(void)
 {
     return g_initialized.load() ? 1 : 0;
+}
+
+rpcs3_ios_core_result rpcs3_ios_core_set_render_view(void* native_view)
+{
+    if (!native_view)
+    {
+        rpcs3::ios::set_core_last_error("A non-null CAMetalLayer-backed UIView is required.");
+        return RPCS3_IOS_CORE_INVALID_ARGUMENT;
+    }
+    if (!renderer_mutation_allowed())
+    {
+        rpcs3::ios::set_core_last_error("The render view can be changed only while emulation is stopped.");
+        return RPCS3_IOS_CORE_BUSY;
+    }
+
+    std::string error;
+    if (!rpcs3::ios::set_core_render_view(native_view, &error))
+    {
+        rpcs3::ios::set_core_last_error(error.empty() ? "Could not attach the render view." : error);
+        return RPCS3_IOS_CORE_INVALID_ARGUMENT;
+    }
+
+    rpcs3::ios::set_core_last_error({});
+    return RPCS3_IOS_CORE_SUCCESS;
+}
+
+rpcs3_ios_core_result rpcs3_ios_core_clear_render_view(void)
+{
+    if (!renderer_mutation_allowed())
+    {
+        rpcs3::ios::set_core_last_error("The render view can be cleared only while emulation is stopped.");
+        return RPCS3_IOS_CORE_BUSY;
+    }
+
+    rpcs3::ios::clear_core_render_view();
+    rpcs3::ios::set_core_last_error({});
+    return RPCS3_IOS_CORE_SUCCESS;
+}
+
+uint8_t rpcs3_ios_core_has_render_view(void)
+{
+    return rpcs3::ios::has_core_render_view() ? 1 : 0;
 }
 
 rpcs3_ios_core_result rpcs3_ios_core_import_path(
