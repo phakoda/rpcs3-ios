@@ -1,0 +1,5 @@
+framework module RPCS3Core {
+    umbrella header "RPCS3Core.h"
+    export *
+    module * { export * }
+}
