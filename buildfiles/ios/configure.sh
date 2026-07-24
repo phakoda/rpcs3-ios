@@ -3,24 +3,42 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: bash buildfiles/ios/configure.sh <device|simulator>
+Usage: bash buildfiles/ios/configure.sh <device|simulator> [bootstrap|full]
 
 Required environment:
   MOLTENVK_ROOT       Root of an unpacked MoltenVK distribution.
+
+Full-build environment:
+  RPCS3_IOS_FFMPEG_ROOT
+                      Static FFmpeg prefix from build_ffmpeg.sh.
+  Qt6_DIR             Qt iOS kit lib/cmake/Qt6 directory.
+  QT_HOST_PATH        Matching macOS Qt host installation.
 
 Optional overrides:
   Vulkan_INCLUDE_DIR Directory containing vulkan/vulkan.h.
   Vulkan_LIBRARY     Exact path to the MoltenVK library for the selected SDK.
   IOS_DEPLOYMENT_TARGET (default: 16.0)
   BUILD_DIR          CMake build directory.
+  RPCS3_IOS_ENABLE_LLVM (default: OFF)
+  RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS (default: OFF)
+  RPCS3_IOS_ENTITLEMENTS_FILE
+                      Custom entitlement plist for a supported research or
+                      development signing environment.
+  RPCS3_IOS_FFMPEG_EXTRA_LIBRARIES
+                      Semicolon-separated extra static FFmpeg dependencies.
 
-The helper configures the native bring-up target. It does not download SDKs,
-firmware, signing identities, or VM state.
+The helper does not download SDKs, firmware, signing identities, VM state, or
+copyrighted console software.
 EOF
 }
 
 platform="${1:-}"
+mode="${2:-bootstrap}"
 if [[ "${platform}" != "device" && "${platform}" != "simulator" ]]; then
+    usage >&2
+    exit 64
+fi
+if [[ "${mode}" != "bootstrap" && "${mode}" != "full" ]]; then
     usage >&2
     exit 64
 fi
@@ -48,7 +66,7 @@ fi
 
 if [[ "${platform}" == "device" ]]; then
     sdk="iphoneos"
-    build_dir="${BUILD_DIR:-${repo_root}/build-ios-device}"
+    default_build_dir="${repo_root}/build-ios-device-${mode}"
     candidate_slices=(
         "${moltenvk_root}/MoltenVK.xcframework/ios-arm64/libMoltenVK.a"
         "${moltenvk_root}/MoltenVK/MoltenVK.xcframework/ios-arm64/libMoltenVK.a"
@@ -56,13 +74,14 @@ if [[ "${platform}" == "device" ]]; then
     )
 else
     sdk="iphonesimulator"
-    build_dir="${BUILD_DIR:-${repo_root}/build-ios-simulator}"
+    default_build_dir="${repo_root}/build-ios-simulator-${mode}"
     candidate_slices=(
         "${moltenvk_root}/MoltenVK.xcframework/ios-arm64_x86_64-simulator/libMoltenVK.a"
         "${moltenvk_root}/MoltenVK/MoltenVK.xcframework/ios-arm64_x86_64-simulator/libMoltenVK.a"
         "${moltenvk_root}/lib/ios-simulator/libMoltenVK.a"
     )
 fi
+build_dir="${BUILD_DIR:-${default_build_dir}}"
 
 vulkan_include_dir="${Vulkan_INCLUDE_DIR:-}"
 if [[ -z "${vulkan_include_dir}" ]]; then
@@ -96,29 +115,81 @@ if [[ ! -f "${vulkan_library}" ]]; then
     exit 66
 fi
 
+if [[ "${mode}" == "full" ]]; then
+    if [[ ! -f "${RPCS3_IOS_FFMPEG_ROOT:-}/include/libavcodec/avcodec.h" ]]; then
+        echo "error: full mode requires RPCS3_IOS_FFMPEG_ROOT" >&2
+        exit 66
+    fi
+    if [[ ! -f "${Qt6_DIR:-}/Qt6Config.cmake" ]]; then
+        echo "error: full mode requires Qt6_DIR from a Qt iOS kit" >&2
+        exit 66
+    fi
+    if [[ ! -d "${QT_HOST_PATH:-}" ]]; then
+        echo "error: full mode requires QT_HOST_PATH for matching macOS Qt tools" >&2
+        exit 66
+    fi
+fi
+
 sdk_path="$(xcrun --sdk "${sdk}" --show-sdk-path)"
 deployment_target="${IOS_DEPLOYMENT_TARGET:-16.0}"
+bootstrap_only="ON"
+target="rpcs3_ios_bootstrap"
+if [[ "${mode}" == "full" ]]; then
+    bootstrap_only="OFF"
+    target="rpcs3"
+fi
 
-echo "Configuring RPCS3 iOS bring-up"
+export Vulkan_INCLUDE_DIR="${vulkan_include_dir}"
+export Vulkan_LIBRARY="${vulkan_library}"
+export VALIDATE_FULL_BUILD="$([[ "${mode}" == "full" ]] && echo 1 || echo 0)"
+bash "${repo_root}/buildfiles/ios/validate_environment.sh" "${platform}"
+
+cmake_args=(
+    -S "${repo_root}"
+    -B "${build_dir}"
+    -G Xcode
+    -DCMAKE_SYSTEM_NAME=iOS
+    -DCMAKE_OSX_SYSROOT="${sdk_path}"
+    -DCMAKE_OSX_ARCHITECTURES=arm64
+    -DCMAKE_OSX_DEPLOYMENT_TARGET="${deployment_target}"
+    -DRPCS3_IOS_BOOTSTRAP_ONLY="${bootstrap_only}"
+    -DRPCS3_IOS_ENABLE_LLVM="${RPCS3_IOS_ENABLE_LLVM:-OFF}"
+    -DRPCS3_IOS_ENABLE_JIT_ENTITLEMENTS="${RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS:-OFF}"
+    -DVulkan_INCLUDE_DIR="${vulkan_include_dir}"
+    -DVulkan_LIBRARY="${vulkan_library}"
+)
+
+if [[ "${mode}" == "full" ]]; then
+    cmake_args+=(
+        -DRPCS3_IOS_FFMPEG_ROOT="${RPCS3_IOS_FFMPEG_ROOT}"
+        -DQt6_DIR="${Qt6_DIR}"
+        -DQT_HOST_PATH="${QT_HOST_PATH}"
+    )
+    if [[ -n "${RPCS3_IOS_FFMPEG_EXTRA_LIBRARIES:-}" ]]; then
+        cmake_args+=(
+            -DRPCS3_IOS_FFMPEG_EXTRA_LIBRARIES="${RPCS3_IOS_FFMPEG_EXTRA_LIBRARIES}"
+        )
+    fi
+fi
+
+if [[ -n "${RPCS3_IOS_ENTITLEMENTS_FILE:-}" ]]; then
+    cmake_args+=(
+        -DRPCS3_IOS_ENTITLEMENTS_FILE="${RPCS3_IOS_ENTITLEMENTS_FILE}"
+    )
+fi
+
+echo "Configuring RPCS3 iOS ${mode} target"
 echo "  SDK: ${sdk_path}"
 echo "  MoltenVK headers: ${vulkan_include_dir}"
 echo "  MoltenVK library: ${vulkan_library}"
 echo "  Build directory: ${build_dir}"
-
-cmake -S "${repo_root}" -B "${build_dir}" -G Xcode \
-    -DCMAKE_SYSTEM_NAME=iOS \
-    -DCMAKE_OSX_SYSROOT="${sdk_path}" \
-    -DCMAKE_OSX_ARCHITECTURES=arm64 \
-    -DCMAKE_OSX_DEPLOYMENT_TARGET="${deployment_target}" \
-    -DRPCS3_IOS_BOOTSTRAP_ONLY=ON \
-    -DVulkan_INCLUDE_DIR="${vulkan_include_dir}" \
-    -DVulkan_LIBRARY="${vulkan_library}"
+cmake "${cmake_args[@]}"
 
 cat <<EOF
 
 Configuration completed.
 Build with:
-  cmake --build "${build_dir}" --config Release --target rpcs3_ios_bootstrap
+  cmake --build "${build_dir}" --config Release --target ${target}
 
 For device deployment, open:
   ${build_dir}/rpcs3.xcodeproj
