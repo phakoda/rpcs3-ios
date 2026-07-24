@@ -27,6 +27,8 @@ REQUIRED_FILES = (
     "rpcs3/ios/IOSCoreDefaults.cpp",
     "rpcs3/ios/IOSCoreEmulator.h",
     "rpcs3/ios/IOSCoreEmulator.mm",
+    "rpcs3/ios/IOSCoreGSFrame.h",
+    "rpcs3/ios/IOSCoreGSFrame.mm",
     "rpcs3/ios/IOSCoreMouseGyro.cpp",
     "rpcs3/ios/RPCS3Core.h",
     "rpcs3/ios/RPCS3Core.mm",
@@ -112,6 +114,9 @@ def validate_public_api(errors: list[str]) -> None:
     for required in (
         "rpcs3_ios_core_initialize",
         "rpcs3_ios_core_shutdown",
+        "rpcs3_ios_core_set_render_view",
+        "rpcs3_ios_core_clear_render_view",
+        "rpcs3_ios_core_has_render_view",
         "rpcs3_ios_core_import_path",
         "rpcs3_ios_core_boot_path",
         "rpcs3_ios_core_pause",
@@ -131,6 +136,7 @@ def validate_public_api(errors: list[str]) -> None:
 
     require(errors, "g_pending_import_source" in implementations, "import-size probing is not side-effect cached")
     require(errors, "RPCS3_IOS_CORE_BUFFER_TOO_SMALL" in implementations, "import buffer contract is missing")
+    require(errors, "render view can be changed only while emulation is stopped" in implementations, "render-view mutation guard is missing")
 
 
 def validate_link_graph(errors: list[str]) -> None:
@@ -146,11 +152,13 @@ def validate_link_graph(errors: list[str]) -> None:
         "RPCS3Core.modulemap",
         "XCODE_EMBED_FRAMEWORKS",
         "IOSCoreEmulator.mm",
+        "IOSCoreGSFrame.mm",
         "IOSCoreMouseGyro.cpp",
         "pad_thread_ios_core.cpp",
         "ios_gamecontroller_pad_handler.cpp",
         "product_info.cpp",
         "RPCS3_IOS_CORE=1",
+        "3rdparty::vulkan",
         "XCODE_ATTRIBUTE_LD_GENERATE_MAP_FILE",
     ):
         require(errors, contract in patch, f"core framework link contract is missing: {contract}")
@@ -227,6 +235,8 @@ def validate_core_policy(errors: list[str]) -> None:
     configure = read("buildfiles/cmake/ConfigureIOS.cmake")
     handler_header = read("rpcs3/Input/ios_gamecontroller_pad_handler.h")
     emulator = read("rpcs3/ios/IOSCoreEmulator.mm")
+    gs_frame = read("rpcs3/ios/IOSCoreGSFrame.mm")
+    consumer = read("rpcs3/ios/CoreLinkMain.mm")
 
     for contract in (
         "RPCS3_IOS_HAS_LLVM",
@@ -239,12 +249,19 @@ def validate_core_policy(errors: list[str]) -> None:
 
     require(errors, "using keyboard_pad_handler = NullPadHandler" in handler_header, "core keyboard factory is not Qt-free")
     require(errors, "named_thread<pad_thread>" in emulator, "core emulator does not initialize the iOS-safe pad thread")
-    require(errors, "NullGSRender" in emulator, "headless core renderer contract is missing")
+    require(errors, "selected_core_renderer" in emulator, "render-host renderer selection is missing")
+    require(errors, "named_thread<VKGSRender>" in emulator, "Vulkan renderer initialization is missing")
+    require(errors, "named_thread<NullGSRender>" in emulator, "Null renderer fallback is missing")
+    require(errors, "make_core_gs_frame" in emulator, "host GSFrame callback is missing")
+    require(errors, "CAMetalLayer" in gs_frame, "core GSFrame is not backed by CAMetalLayer")
+    require(errors, "set_core_render_view" in gs_frame, "core render-view storage is missing")
+    require(errors, "rpcs3_ios_core_set_render_view" in consumer, "framework consumer does not attach its render view")
     require(errors, "CubebBackend" in emulator, "native audio backend contract is missing")
 
 
 def validate_packaging(errors: list[str]) -> None:
     script = read("buildfiles/ios/create_core_xcframework.sh")
+    archive = read("buildfiles/ios/archive.sh")
     require(errors, script.startswith("#!/usr/bin/env bash\n"), "XCFramework helper lacks the expected Bash shebang")
     require(errors, "set -euo pipefail" in script, "XCFramework helper lacks strict mode")
     for contract in (
@@ -256,6 +273,13 @@ def validate_packaging(errors: list[str]) -> None:
         "lipo -archs",
     ):
         require(errors, contract in script, f"XCFramework packaging contract is missing: {contract}")
+
+    for contract in (
+        "rpcs3_ios_core_link",
+        "Frameworks/RPCS3Core.framework",
+        "RPCS3Core-device.framework",
+    ):
+        require(errors, contract in archive, f"core archive extraction contract is missing: {contract}")
 
 
 def main() -> int:
