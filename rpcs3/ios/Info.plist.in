@@ -37,6 +37,8 @@
             </array>
         </dict>
     </array>
+    <key>GCSupportsControllerUserInteraction</key>
+    <true/>
     <key>LSApplicationQueriesSchemes</key>
     <array>
         <string>apple-magnifier</string>
