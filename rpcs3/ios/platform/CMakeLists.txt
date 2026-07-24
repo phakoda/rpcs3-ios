@@ -12,6 +12,7 @@ find_library(IOS_PLATFORM_UNIFORMTYPES UniformTypeIdentifiers REQUIRED)
 add_library(rpcs3_ios_platform STATIC
     IOSPlatform.mm
     IOSJIT.mm
+    IOSPerformance.mm
 )
 
 target_compile_features(rpcs3_ios_platform PUBLIC cxx_std_20)
