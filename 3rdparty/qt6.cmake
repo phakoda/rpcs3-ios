@@ -2,9 +2,21 @@ add_library(3rdparty_qt6 INTERFACE)
 
 set(QT_MIN_VER 6.7.0)
 
-find_package(Qt6 ${QT_MIN_VER} CONFIG COMPONENTS Widgets Concurrent Multimedia MultimediaWidgets Svg SvgWidgets)
+find_package(Qt6 ${QT_MIN_VER} CONFIG COMPONENTS Widgets Concurrent Multimedia MultimediaWidgets Svg SvgWidgets Gui)
 if(WIN32)
 	target_link_libraries(3rdparty_qt6 INTERFACE Qt6::Widgets Qt6::Concurrent Qt6::Multimedia Qt6::MultimediaWidgets Qt6::Svg Qt6::SvgWidgets)
+elseif(RPCS3_IOS)
+    # Qt's iOS kit is cross-compiled and intentionally does not expose desktop
+    # integration modules such as DBus or private platform headers from the
+    # macOS host installation.
+    target_link_libraries(3rdparty_qt6 INTERFACE
+        Qt6::Widgets
+        Qt6::Gui
+        Qt6::Concurrent
+        Qt6::Multimedia
+        Qt6::MultimediaWidgets
+        Qt6::Svg
+        Qt6::SvgWidgets)
 else()
     find_package(Qt6 ${QT_MIN_VER} COMPONENTS DBus Gui)
     if(Qt6_VERSION VERSION_GREATER_EQUAL "6.10.0")
@@ -43,6 +55,8 @@ else()
 		message(FATAL_ERROR "Make sure the Qt6_ROOT environment variable has been set properly. (for example C:\\Qt\\${QT_MIN_VER}\\msvc2022_64\\)")
 	elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 		message(FATAL_ERROR "Make sure to install your distro's qt6 package!")
+    elseif(RPCS3_IOS)
+        message(FATAL_ERROR "Set Qt6_DIR to the lib/cmake/Qt6 directory from a Qt iOS kit and QT_HOST_PATH to the matching macOS host tools.")
 	else()
 		message(FATAL_ERROR "You need to have Qt6 installed, look online for instructions on installing Qt6 on ${CMAKE_SYSTEM}.")
 	endif()
