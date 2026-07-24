@@ -1,5 +1,6 @@
 #include "IOSCoreEmulator.h"
 #include "IOSCoreDefaults.h"
+#include "IOSCoreGSFrame.h"
 #include "RPCS3Core.h"
 #include "platform/IOSPlatform.h"
 
@@ -10,6 +11,7 @@
 #include "Emu/system_config.h"
 #include "Emu/RSX/GSFrameBase.h"
 #include "Emu/RSX/Null/NullGSRender.h"
+#include "Emu/RSX/VK/VKGSRender.h"
 #include "Emu/Audio/AudioBackend.h"
 #include "Emu/Audio/Null/NullAudioBackend.h"
 #include "Emu/Audio/Null/null_enumerator.h"
@@ -79,6 +81,19 @@ std::string append_path_component(std::string base, std::string_view component)
     }
     base.append(component);
     return base;
+}
+
+video_renderer selected_core_renderer()
+{
+    return rpcs3::ios::has_core_render_view()
+        ? video_renderer::vulkan
+        : video_renderer::null;
+}
+
+void apply_core_runtime_settings()
+{
+    rpcs3::ios::apply_core_compatibility_defaults();
+    g_cfg.video.renderer = selected_core_renderer();
 }
 
 void deliver_event(rpcs3_ios_core_event event, std::string detail = {})
@@ -209,20 +224,26 @@ EmuCallbacks make_core_callbacks()
         ensure(g_fxo->init<named_thread<pad_thread>>(nullptr, nullptr, title_id));
     };
 
-    callbacks.update_emu_settings = []
-    {
-        rpcs3::ios::apply_core_compatibility_defaults();
-        g_cfg.video.renderer = video_renderer::null;
-    };
+    callbacks.update_emu_settings = apply_core_runtime_settings;
     callbacks.save_emu_settings = []
     {
         Emulator::SaveSettings(g_cfg.to_string(), Emu.GetTitleID());
     };
     callbacks.close_gs_frame = [] {};
-    callbacks.get_gs_frame = []() -> std::unique_ptr<GSFrameBase> { return {}; };
+    callbacks.get_gs_frame = []() -> std::unique_ptr<GSFrameBase>
+    {
+        return rpcs3::ios::make_core_gs_frame();
+    };
     callbacks.init_gs_render = [](utils::serial* archive)
     {
-        g_fxo->init<rsx::thread, named_thread<NullGSRender>>(archive);
+        if (selected_core_renderer() == video_renderer::vulkan)
+        {
+            g_fxo->init<rsx::thread, named_thread<VKGSRender>>(archive);
+        }
+        else
+        {
+            g_fxo->init<rsx::thread, named_thread<NullGSRender>>(archive);
+        }
     };
 
     callbacks.get_camera_handler = []() -> std::shared_ptr<camera_handler_base>
@@ -366,10 +387,9 @@ bool initialize_core_emulator(std::string* error)
         Emu.SetUsr("00000001");
         Emu.Init();
 
-        apply_core_compatibility_defaults();
-        g_cfg.video.renderer = video_renderer::null;
-        Emu.SetSupportedRenderers({video_renderer::null});
-        Emu.SetDefaultRenderer(video_renderer::null);
+        apply_core_runtime_settings();
+        Emu.SetSupportedRenderers({video_renderer::vulkan, video_renderer::null});
+        Emu.SetDefaultRenderer(selected_core_renderer());
         Emu.SetCallbacks(make_core_callbacks());
 
         g_core_input_enabled = true;
@@ -437,8 +457,8 @@ rpcs3_ios_boot_result rpcs3_ios_core_boot_path(const char* path, uint8_t direct_
     std::lock_guard lock(g_emulator_api_mutex);
     try
     {
-        rpcs3::ios::apply_core_compatibility_defaults();
-        g_cfg.video.renderer = video_renderer::null;
+        apply_core_runtime_settings();
+        Emu.SetDefaultRenderer(selected_core_renderer());
         Emu.SetForceBoot(true);
         const game_boot_result result = Emu.BootGame(path, {}, direct_boot != 0, cfg_mode::custom);
         if (is_error(result))
