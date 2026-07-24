@@ -105,7 +105,9 @@ controller_capabilities get_combined_controller_capabilities(std::size_t logical
     const std::size_t hardware_count = hardware_controller_count();
     if (logical_index < hardware_count)
     {
-        return detail::get_hardware_controller_capabilities(logical_index);
+        controller_capabilities result = detail::get_hardware_controller_capabilities(logical_index);
+        result.has_light = detail::has_hardware_controller_light(logical_index);
+        return result;
     }
 
     controller_state virtual_controller;
@@ -158,6 +160,12 @@ bool set_combined_controller_rumble(std::size_t logical_index, float low_frequen
         return detail::set_device_rumble(low_frequency, high_frequency);
     }
     return false;
+}
+
+bool set_combined_controller_light(std::size_t logical_index, float red, float green, float blue)
+{
+    return logical_index < hardware_controller_count() &&
+        detail::set_hardware_controller_light(logical_index, red, green, blue);
 }
 
 void stop_all_controller_haptics()
