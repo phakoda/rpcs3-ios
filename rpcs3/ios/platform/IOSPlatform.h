@@ -109,6 +109,7 @@ struct controller_capabilities
 {
     bool has_motion = false;
     bool has_haptics = false;
+    bool has_light = false;
     bool has_battery = false;
     float battery_level = -1.0f;
     controller_battery_state battery_state = controller_battery_state::unknown;
@@ -248,6 +249,7 @@ bool get_combined_controller_state(std::size_t logical_index, controller_state* 
 controller_capabilities get_combined_controller_capabilities(std::size_t logical_index);
 controller_motion_state get_combined_controller_motion(std::size_t logical_index);
 bool set_combined_controller_rumble(std::size_t logical_index, float low_frequency, float high_frequency);
+bool set_combined_controller_light(std::size_t logical_index, float red, float green, float blue);
 void stop_all_controller_haptics();
 
 void set_virtual_controller_state(controller_state state);
