@@ -7,7 +7,7 @@ RPCS3
 The world's first free and open-source PlayStation 3 emulator/debugger, written in C++ for Windows, Linux, macOS and FreeBSD.
 
 You can find some basic information on our [**website**](https://rpcs3.net/). Game info is being populated on the [**Wiki**](https://wiki.rpcs3.net/).
-For discussion about this emulator, PS3 emulation, and game compatibility reports, please visit our [**forums**](https://forums.rpcs3.net) and our [**Discord server**](https://discord.gg/RPCS3).
+For discussion about this emulator, PS3 emulation, and game compatibility reports, please visit our [**forums**](https://forums.rpcs3.net) and our [**Discord server**](https://discord.gg/rpcs3).
 
 [**Support the Lead Developers on Patreon**](https://rpcs3.net/patreon)
 
@@ -31,17 +31,19 @@ We have unfortunately seen a rise in untested and unverified AI-generated slop b
 
 **Pull requests opened by AI agents or automated tools must include a disclosure in the PR description** stating the scope of AI involvement — which parts were AI-generated and what human testing or review was performed prior to submission. PRs that omit this disclosure may be closed without review.
 
-If you are unsure about your work, open a discussion issue to talk it through with the team, or reach out to a maintainer on [Discord](https://discord.gg/RPCS3).
+If you are unsure about your work, open a discussion issue to talk it through with the team, or reach out to a maintainer on [Discord](https://discord.gg/rpcs3).
 
 ## Building
 
-See [BUILDING.md](BUILDING.md) for more information about how to setup an environment to build RPCS3.
+See [BUILDING.md](BUILDING.md) for desktop build instructions.
+
+The experimental iOS/iPadOS bring-up workflow is documented in [BUILDING_IOS.md](BUILDING_IOS.md).
 
 ## Running
 
 Check our friendly [quickstart](https://rpcs3.net/quickstart) guide to make sure your computer meets the minimum system requirements to run RPCS3.
 
-Don't forget to have your graphics driver up to date and to install the [Visual C++ Redistributable Packages for Visual Studio 2022](https://aka.ms/vs/17/release/VC_redist.x64.exe) if you are a Windows user.
+Don't forget to have your graphics driver up to date and to install the [Visual C++ Redistributable Packages for Visual Studio 2022](https://aka.ms/vs/17/release/vc_redist.x64.exe) if you are a Windows user.
 
 ## License
 
