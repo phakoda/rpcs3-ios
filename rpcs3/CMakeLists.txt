@@ -31,8 +31,16 @@ if (NOT ANDROID)
     include(${CMAKE_SOURCE_DIR}/3rdparty/qt6.cmake)
 endif()
 
+if(RPCS3_IOS)
+    add_subdirectory(ios/platform)
+endif()
+
 # subdirectories
 add_subdirectory(Emu)
+
+if(RPCS3_IOS)
+    target_link_libraries(rpcs3_emu PUBLIC rpcs3_ios_platform)
+endif()
 
 if (NOT ANDROID)
     add_subdirectory(rpcs3qt)
@@ -115,8 +123,7 @@ if (NOT ANDROID)
                     XCODE_ATTRIBUTE_SKIP_INSTALL "NO")
             target_link_options(rpcs3 PRIVATE "-ObjC")
             target_link_libraries(rpcs3 PRIVATE
-                "-framework UIKit"
-                "-framework Foundation"
+                rpcs3_ios_platform
                 "-framework QuartzCore"
                 "-framework Metal"
                 "-framework IOSurface"
