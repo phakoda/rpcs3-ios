@@ -113,10 +113,12 @@ RPCS3_IOS_CORE_EXPORT uint8_t rpcs3_ios_core_is_initialized(void);
 
 // native_view must be a retained or otherwise live UIView backed by
 // CAMetalLayer. Pass it from Objective-C/Objective-C++ as (__bridge void*)view.
-// The view can be changed only while emulation is stopped.
+// The view can be changed only while emulation is stopped. Call refresh after
+// host layout or orientation changes to update contentsScale and drawableSize.
 RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_set_render_view(void* native_view);
 RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_clear_render_view(void);
 RPCS3_IOS_CORE_EXPORT uint8_t rpcs3_ios_core_has_render_view(void);
+RPCS3_IOS_CORE_EXPORT void rpcs3_ios_core_refresh_render_view(void);
 
 // Events are delivered on the UIKit main queue. The caller owns context and
 // must clear the callback before releasing it or unloading the framework host.
