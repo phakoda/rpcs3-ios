@@ -4,7 +4,6 @@ endif()
 
 set(Vulkan_INCLUDE_DIR "" CACHE PATH "Directory containing vulkan/vulkan.h from the MoltenVK distribution")
 set(Vulkan_LIBRARY "" CACHE FILEPATH "Path to the iOS or iOS Simulator MoltenVK library")
-option(RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS "Apply development-only JIT entitlements to the iOS target" OFF)
 
 if(NOT EXISTS "${Vulkan_INCLUDE_DIR}/vulkan/vulkan.h")
     message(FATAL_ERROR
