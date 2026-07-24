@@ -273,6 +273,19 @@ bool has_core_render_view()
     return g_render_view != nil;
 }
 
+void refresh_core_render_view()
+{
+    __strong UIView* view = nil;
+    {
+        std::lock_guard lock(g_render_view_mutex);
+        view = g_render_view;
+    }
+    if (view)
+    {
+        run_on_main_async(^{ update_metal_drawable(view); });
+    }
+}
+
 std::unique_ptr<GSFrameBase> make_core_gs_frame()
 {
     __strong UIView* view = nil;
