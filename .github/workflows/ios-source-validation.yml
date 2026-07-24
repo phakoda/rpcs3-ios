@@ -1,0 +1,56 @@
+name: iOS source validation
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ios-source-validation.yml'
+      - 'CMakeLists.txt'
+      - '3rdparty/ios.cmake'
+      - 'buildfiles/cmake/ConfigureIOS.cmake'
+      - 'buildfiles/ios/**'
+      - 'rpcs3/CMakeLists.txt'
+      - 'rpcs3/ios/**'
+      - 'rpcs3/Input/ios_gamecontroller_pad_handler.*'
+      - 'rpcs3/Emu/Io/pad_config*'
+      - 'rpcs3/rpcs3qt/CMakeLists.txt'
+      - 'BUILDING_IOS.md'
+      - 'PORTING_IOS.md'
+  push:
+    branches:
+      - 'agent/ios-bootstrap'
+    paths:
+      - '.github/workflows/ios-source-validation.yml'
+      - 'CMakeLists.txt'
+      - '3rdparty/ios.cmake'
+      - 'buildfiles/cmake/ConfigureIOS.cmake'
+      - 'buildfiles/ios/**'
+      - 'rpcs3/CMakeLists.txt'
+      - 'rpcs3/ios/**'
+      - 'rpcs3/Input/ios_gamecontroller_pad_handler.*'
+      - 'rpcs3/Emu/Io/pad_config*'
+      - 'rpcs3/rpcs3qt/CMakeLists.txt'
+      - 'BUILDING_IOS.md'
+      - 'PORTING_IOS.md'
+
+permissions:
+  contents: read
+
+jobs:
+  source-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Validate shell syntax
+        shell: bash
+        run: |
+          bash -n buildfiles/ios/configure.sh
+          bash -n buildfiles/ios/build_ffmpeg.sh
+          bash -n buildfiles/ios/validate_environment.sh
+          bash -n buildfiles/ios/archive.sh
+          bash -n buildfiles/ios/deploy.sh
+
+      - name: Validate iOS source contracts
+        run: python3 buildfiles/ios/validate_sources.py
