@@ -85,6 +85,15 @@ void log_performance_event(rpcs3::ios::performance_event event, rpcs3::ios::perf
         break;
     }
 }
+
+void refresh_touch_controller_visibility()
+{
+    const u32 hardware_count = static_cast<u32>(rpcs3::ios::get_controller_states().size());
+    rpcs3::ios::set_touch_controller_overlay_visible(hardware_count == 0);
+    ios_log.notice("GameController configuration changed; %u hardware controller(s) are connected. Touch controls are %s.",
+        hardware_count,
+        hardware_count == 0 ? "enabled" : "hidden");
+}
 }
 
 namespace rpcs3::ios
@@ -110,14 +119,12 @@ void initialize_rpcs3_runtime()
             }
             resume_after_ios_reason(ios_pause_audio_interruption);
         },
-        .controller_configuration_changed = []
-        {
-            ios_log.notice("GameController configuration changed; %u controller(s) are connected.", get_controller_states().size());
-        },
+        .controller_configuration_changed = refresh_touch_controller_visibility,
     });
 
     set_performance_callback(log_performance_event);
     set_idle_timer_disabled(true);
+    refresh_touch_controller_visibility();
 
     std::string audio_error;
     if (!configure_audio_session(false, false, &audio_error))
@@ -144,6 +151,8 @@ void shutdown_rpcs3_runtime()
         return;
     }
 
+    set_touch_controller_overlay_visible(false);
+    clear_virtual_controller_state();
     set_idle_timer_disabled(false);
     set_performance_callback({});
     set_lifecycle_callbacks({});
