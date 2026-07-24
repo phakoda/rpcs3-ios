@@ -129,7 +129,11 @@ if (NOT ANDROID)
                 "-framework IOSurface"
                 "-framework CoreGraphics"
                 "-framework CoreVideo")
-            if(RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS)
+            if(RPCS3_IOS_ENTITLEMENTS_FILE)
+                set_target_properties(rpcs3
+                    PROPERTIES
+                        XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${RPCS3_IOS_ENTITLEMENTS_FILE}")
+            elseif(RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS)
                 set_target_properties(rpcs3
                     PROPERTIES
                         XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_CURRENT_SOURCE_DIR}/ios/JIT.entitlements")
