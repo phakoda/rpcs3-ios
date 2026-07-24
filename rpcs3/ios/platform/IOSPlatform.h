@@ -199,6 +199,7 @@ struct lifecycle_callbacks
     std::function<void()> controller_configuration_changed;
 };
 
+using jit_enablement_callback = std::function<void(bool enabled, jit_capabilities capabilities, std::string detail)>;
 using performance_callback = std::function<void(performance_event event, performance_state state)>;
 using external_display_callback = std::function<void(external_display_state state)>;
 using import_callback = std::function<void(std::vector<std::string> imported_paths, std::string error)>;
@@ -238,6 +239,7 @@ private:
 
 std::vector<jit_provider_state> get_jit_provider_states();
 bool request_jit(jit_provider provider, std::string* error = nullptr);
+void wait_for_jit_enablement(double timeout_seconds, jit_enablement_callback callback);
 
 performance_state get_performance_state();
 void set_performance_callback(performance_callback callback);
