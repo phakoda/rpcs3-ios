@@ -139,6 +139,20 @@ void set_idle_timer_disabled(bool disabled);
 
 std::vector<controller_state> get_controller_states();
 
+// Synthetic controller state used by the native multitouch overlay. Hardware
+// controllers remain separate; input handlers may prepend this state as Player
+// 1 when it is connected.
+void set_virtual_controller_state(controller_state state);
+bool get_virtual_controller_state(controller_state* state);
+void clear_virtual_controller_state();
+
+// Attaches a transparent multitouch DualShock-style overlay to a UIView pointer
+// (normally the Qt game window's native view). Calls are marshalled to the main
+// thread and are idempotent for the same parent view.
+void attach_touch_controller_overlay(void* native_view);
+void detach_touch_controller_overlay(void* native_view);
+void set_touch_controller_overlay_visible(bool visible);
+
 void set_lifecycle_callbacks(lifecycle_callbacks callbacks);
 
 // Presents the system document picker from a UIViewController pointer. Chosen
