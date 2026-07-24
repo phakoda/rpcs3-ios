@@ -4,6 +4,14 @@
 
 #include "Emu/Io/PadHandler.h"
 
+#if defined(RPCS3_IOS_CORE)
+#include "Emu/Io/Null/NullPadHandler.h"
+// The generated core pad factory retains the serialized keyboard handler case,
+// but the framework intentionally has no Qt keyboard/window implementation.
+// Alias that factory type to the core Null handler only for RPCS3Core.framework.
+using keyboard_pad_handler = NullPadHandler;
+#endif
+
 #include <array>
 #include <map>
 #include <memory>
