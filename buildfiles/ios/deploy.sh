@@ -84,7 +84,11 @@ if [[ "${platform}" == "simulator" ]]; then
 else
     device="${DEVICE:-}"
     if [[ -z "${device}" ]]; then
-        mapfile -t devices < <(xcrun devicectl list devices 2>/dev/null | awk '/connected/ {print $1}')
+        devices=()
+        while IFS= read -r candidate; do
+            [[ -n "${candidate}" ]] && devices+=("${candidate}")
+        done < <(xcrun devicectl list devices 2>/dev/null | awk '/connected/ {print $1}')
+
         if [[ "${#devices[@]}" != "1" ]]; then
             echo "error: set DEVICE to a CoreDevice identifier, name, or UDID" >&2
             xcrun devicectl list devices || true
