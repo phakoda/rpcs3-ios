@@ -185,6 +185,41 @@ add_library(rpcs3_ui STATIC
     "../resources.qrc"
 )
 
+if(RPCS3_IOS)
+    # Keep the shared pad thread source byte-for-byte unchanged in the repository.
+    # The iOS target compiles a generated copy containing only the platform
+    # include and factory case required to instantiate GameController devices.
+    set(_pad_thread_source "${CMAKE_CURRENT_SOURCE_DIR}/../Input/pad_thread.cpp")
+    set(_pad_thread_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/ios-generated")
+    set(_pad_thread_generated "${_pad_thread_generated_dir}/pad_thread_ios.cpp")
+    file(MAKE_DIRECTORY "${_pad_thread_generated_dir}")
+    file(READ "${_pad_thread_source}" _pad_thread_contents)
+
+    set(_pad_thread_include_anchor "#include \"ps_move_handler.h\"")
+    set(_pad_thread_include_replacement "#include \"ps_move_handler.h\"\n#include \"ios_gamecontroller_pad_handler.h\"")
+    string(REPLACE "${_pad_thread_include_anchor}" "${_pad_thread_include_replacement}" _pad_thread_contents "${_pad_thread_contents}")
+
+    set(_pad_thread_factory_anchor "\tcase pad_handler::move:\n\t\treturn std::make_shared<ps_move_handler>();")
+    set(_pad_thread_factory_replacement "\tcase pad_handler::move:\n\t\treturn std::make_shared<ps_move_handler>();\n\tcase pad_handler::ios_gamecontroller:\n\t\treturn std::make_shared<ios_gamecontroller_pad_handler>();")
+    string(REPLACE "${_pad_thread_factory_anchor}" "${_pad_thread_factory_replacement}" _pad_thread_contents "${_pad_thread_contents}")
+
+    if(NOT _pad_thread_contents MATCHES "ios_gamecontroller_pad_handler")
+        message(FATAL_ERROR "Could not inject the iOS GameController factory into pad_thread.cpp")
+    endif()
+
+    file(WRITE "${_pad_thread_generated}" "${_pad_thread_contents}")
+    get_target_property(_rpcs3_ui_sources rpcs3_ui SOURCES)
+    list(REMOVE_ITEM _rpcs3_ui_sources "../Input/pad_thread.cpp")
+    set_property(TARGET rpcs3_ui PROPERTY SOURCES "${_rpcs3_ui_sources}")
+    target_sources(rpcs3_ui PRIVATE
+        "${_pad_thread_generated}"
+        ../Input/ios_gamecontroller_pad_handler.cpp
+        ../Input/ios_gamecontroller_pad_handler.h)
+    target_include_directories(rpcs3_ui PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/.."
+        "${CMAKE_CURRENT_SOURCE_DIR}/../Input")
+endif()
+
 if(HAS_MEMORY_BREAKPOINTS)
     target_compile_definitions(rpcs3_ui PRIVATE RPCS3_HAS_MEMORY_BREAKPOINTS)
 endif()
