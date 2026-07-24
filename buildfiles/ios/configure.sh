@@ -22,6 +22,9 @@ Optional overrides:
   IOS_DEPLOYMENT_TARGET (default: 16.0)
   BUILD_DIR          CMake build directory.
   RPCS3_IOS_ENABLE_LLVM (default: OFF)
+  RPCS3_IOS_LLVM_ROOT
+                      Static target LLVM prefix from build_llvm.sh. Required
+                      when RPCS3_IOS_ENABLE_LLVM=ON.
   RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS (default: OFF)
   RPCS3_IOS_ENTITLEMENTS_FILE
                       Custom entitlement plist for a supported research or
@@ -129,6 +132,20 @@ if [[ "${mode}" == "core" || "${mode}" == "full" ]]; then
     fi
 fi
 
+llvm_enabled="${RPCS3_IOS_ENABLE_LLVM:-OFF}"
+case "${llvm_enabled}" in
+    ON|on|TRUE|true|1|YES|yes)
+        llvm_enabled="ON"
+        if [[ "${mode}" == "bootstrap" ]]; then
+            echo "warning: RPCS3_IOS_ENABLE_LLVM has no effect in bootstrap mode" >&2
+        elif [[ ! -f "${RPCS3_IOS_LLVM_ROOT:-}/lib/cmake/llvm/LLVMConfig.cmake" ]]; then
+            echo "error: LLVM mode requires RPCS3_IOS_LLVM_ROOT from build_llvm.sh" >&2
+            exit 66
+        fi
+        ;;
+    *) llvm_enabled="OFF" ;;
+esac
+
 if [[ "${mode}" == "full" ]]; then
     if [[ ! -f "${Qt6_DIR:-}/Qt6Config.cmake" ]]; then
         echo "error: full mode requires Qt6_DIR from a Qt iOS kit" >&2
@@ -168,7 +185,7 @@ cmake_args=(
     -DCMAKE_OSX_DEPLOYMENT_TARGET="${deployment_target}"
     -DRPCS3_IOS_BOOTSTRAP_ONLY="${bootstrap_only}"
     -DRPCS3_IOS_BUILD_QT_FRONTEND="${qt_frontend}"
-    -DRPCS3_IOS_ENABLE_LLVM="${RPCS3_IOS_ENABLE_LLVM:-OFF}"
+    -DRPCS3_IOS_ENABLE_LLVM="${llvm_enabled}"
     -DRPCS3_IOS_ENABLE_JIT_ENTITLEMENTS="${RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS:-OFF}"
     -DVulkan_INCLUDE_DIR="${vulkan_include_dir}"
     -DVulkan_LIBRARY="${vulkan_library}"
@@ -181,6 +198,11 @@ if [[ "${mode}" == "core" || "${mode}" == "full" ]]; then
     if [[ -n "${RPCS3_IOS_FFMPEG_EXTRA_LIBRARIES:-}" ]]; then
         cmake_args+=(
             -DRPCS3_IOS_FFMPEG_EXTRA_LIBRARIES="${RPCS3_IOS_FFMPEG_EXTRA_LIBRARIES}"
+        )
+    fi
+    if [[ "${llvm_enabled}" == "ON" ]]; then
+        cmake_args+=(
+            -DRPCS3_IOS_LLVM_ROOT="${RPCS3_IOS_LLVM_ROOT}"
         )
     fi
 fi
@@ -202,6 +224,10 @@ echo "Configuring RPCS3 iOS ${mode} target"
 echo "  SDK: ${sdk_path}"
 echo "  MoltenVK headers: ${vulkan_include_dir}"
 echo "  MoltenVK library: ${vulkan_library}"
+echo "  LLVM: ${llvm_enabled}"
+if [[ "${llvm_enabled}" == "ON" ]]; then
+    echo "  LLVM root: ${RPCS3_IOS_LLVM_ROOT}"
+fi
 echo "  Build directory: ${build_dir}"
 cmake "${cmake_args[@]}"
 
