@@ -203,13 +203,13 @@ if(RPCS3_IOS)
     set(_pad_thread_factory_replacement "\tcase pad_handler::move:\n\t\treturn std::make_shared<ps_move_handler>();\n\tcase pad_handler::ios_gamecontroller:\n\t\treturn std::make_shared<ios_gamecontroller_pad_handler>();")
     string(REPLACE "${_pad_thread_factory_anchor}" "${_pad_thread_factory_replacement}" _pad_thread_contents "${_pad_thread_contents}")
 
-    if(NOT _pad_thread_contents MATCHES "ios_gamecontroller_pad_handler")
+    if(NOT _pad_thread_contents MATCHES "case pad_handler::ios_gamecontroller")
         message(FATAL_ERROR "Could not inject the iOS GameController factory into pad_thread.cpp")
     endif()
 
     file(WRITE "${_pad_thread_generated}" "${_pad_thread_contents}")
     get_target_property(_rpcs3_ui_sources rpcs3_ui SOURCES)
-    list(REMOVE_ITEM _rpcs3_ui_sources "../Input/pad_thread.cpp")
+    list(FILTER _rpcs3_ui_sources EXCLUDE REGEX "Input/pad_thread\\.cpp$")
     set_property(TARGET rpcs3_ui PROPERTY SOURCES "${_rpcs3_ui_sources}")
     target_sources(rpcs3_ui PRIVATE
         "${_pad_thread_generated}"
