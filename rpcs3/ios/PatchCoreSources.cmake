@@ -128,6 +128,8 @@ if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_fram
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreEmulator.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreGSFrame.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreGSFrame.h"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreLifecycle.cpp"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreLifecycle.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreMouseGyro.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/CoreAnchor.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/rpcs3_version.cpp"
@@ -215,7 +217,7 @@ endif()
 if(TARGET rpcs3_ui)
     # Qt creates UIApplication while constructing gui_application. Initialize
     # native services immediately after that application object exists rather
-    # from main(), where UIKit services are not ready yet.
+    # than from main(), where UIKit services are not ready yet.
     set(_frontend_source "${CMAKE_SOURCE_DIR}/rpcs3/rpcs3.cpp")
     set(_frontend_generated "${_ios_generated_dir}/rpcs3_ios.cpp")
     file(READ "${_frontend_source}" _frontend_contents)
