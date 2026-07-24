@@ -177,6 +177,10 @@ void initialize_rpcs3_runtime()
     {
         g_file_open_filter = std::make_unique<ios_file_open_filter>();
         application->installEventFilter(g_file_open_filter.get());
+        QObject::connect(application, &QCoreApplication::aboutToQuit, application, []
+        {
+            rpcs3::ios::shutdown_rpcs3_runtime();
+        });
     }
 
     std::string audio_error;
