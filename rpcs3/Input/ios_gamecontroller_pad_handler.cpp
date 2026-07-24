@@ -83,6 +83,8 @@ ios_gamecontroller_pad_handler::ios_gamecontroller_pad_handler()
     b_has_deadzones = true;
     b_has_rumble = true;
     b_has_motion = true;
+    b_has_led = true;
+    b_has_rgb = true;
     b_has_battery = true;
     b_has_orientation = true;
     b_has_pressure_intensity_button = false;
@@ -372,10 +374,30 @@ void ios_gamecontroller_pad_handler::apply_pad_data(const pad_ensemble& binding)
         return;
     }
 
-    if (rpcs3::ios::set_combined_controller_rumble(
+    const auto capabilities = rpcs3::ios::get_combined_controller_capabilities(controller->controller_index);
+    bool attempted_output = false;
+    bool output_succeeded = true;
+
+    if (capabilities.has_haptics)
+    {
+        attempted_output = true;
+        output_succeeded &= rpcs3::ios::set_combined_controller_rumble(
             controller->controller_index,
             large_motor / 255.0f,
-            small_motor / 255.0f))
+            small_motor / 255.0f);
+    }
+
+    if (capabilities.has_light)
+    {
+        attempted_output = true;
+        output_succeeded &= rpcs3::ios::set_combined_controller_light(
+            controller->controller_index,
+            controller->config->colorR.get() / 255.0f,
+            controller->config->colorG.get() / 255.0f,
+            controller->config->colorB.get() / 255.0f);
+    }
+
+    if (!attempted_output || output_succeeded)
     {
         controller->large_motor = large_motor;
         controller->small_motor = small_motor;
