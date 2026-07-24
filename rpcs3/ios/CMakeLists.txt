@@ -2,6 +2,8 @@ if(NOT RPCS3_IOS)
     message(FATAL_ERROR "The iOS bootstrap target requires -DCMAKE_SYSTEM_NAME=iOS")
 endif()
 
+add_subdirectory(platform)
+
 set(Vulkan_INCLUDE_DIR "" CACHE PATH "Directory containing vulkan/vulkan.h from the MoltenVK distribution")
 set(Vulkan_LIBRARY "" CACHE FILEPATH "Path to the iOS or iOS Simulator MoltenVK library")
 
@@ -15,8 +17,6 @@ if(NOT EXISTS "${Vulkan_LIBRARY}")
         "Vulkan_LIBRARY must point to a MoltenVK library built for the selected iOS SDK and architecture")
 endif()
 
-find_library(UIKIT_FRAMEWORK UIKit REQUIRED)
-find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
 find_library(QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
 find_library(METAL_FRAMEWORK Metal REQUIRED)
 find_library(IOSURFACE_FRAMEWORK IOSurface REQUIRED)
@@ -32,9 +32,8 @@ target_compile_definitions(rpcs3_ios_bootstrap PRIVATE VK_USE_PLATFORM_METAL_EXT
 target_include_directories(rpcs3_ios_bootstrap PRIVATE "${Vulkan_INCLUDE_DIR}")
 target_link_options(rpcs3_ios_bootstrap PRIVATE "-ObjC")
 target_link_libraries(rpcs3_ios_bootstrap PRIVATE
+    rpcs3_ios_platform
     "${Vulkan_LIBRARY}"
-    "${UIKIT_FRAMEWORK}"
-    "${FOUNDATION_FRAMEWORK}"
     "${QUARTZCORE_FRAMEWORK}"
     "${METAL_FRAMEWORK}"
     "${IOSURFACE_FRAMEWORK}"
