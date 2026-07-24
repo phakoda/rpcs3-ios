@@ -14,6 +14,7 @@
 #include <atomic>
 #include <cerrno>
 #include <cstring>
+#include <iterator>
 
 namespace
 {
@@ -44,7 +45,7 @@ bool entitlement_is_true(CFStringRef entitlement)
 bool process_is_debugged()
 {
     int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()};
-    kinfo_proc process_info{};
+    struct kinfo_proc process_info{};
     std::size_t size = sizeof(process_info);
     if (sysctl(mib, static_cast<u_int>(std::size(mib)), &process_info, &size, nullptr, 0) != 0)
     {
@@ -268,8 +269,7 @@ jit_probe_result run_jit_execution_probe()
         return result;
     }
 
-    // mov w0, #42; ret
-    constexpr std::uint32_t code[] = {0x52800540u, 0xd65f03c0u};
+    constexpr std::uint32_t code[] = {0x52800540u, 0xd65f03c0u}; // mov w0, #42; ret
     result.attempted = true;
     result.dual_mapped = region.dual_mapped;
 
