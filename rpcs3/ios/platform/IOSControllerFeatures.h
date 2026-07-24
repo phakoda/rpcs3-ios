@@ -4,6 +4,7 @@
 
 namespace rpcs3::ios::detail
 {
+void normalize_hardware_controller_slots();
 controller_capabilities get_hardware_controller_capabilities(std::size_t index);
 controller_motion_state get_hardware_controller_motion(std::size_t index);
 controller_motion_state get_device_motion();
