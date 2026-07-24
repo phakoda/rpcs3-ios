@@ -54,6 +54,12 @@ set(CMAKE_XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC YES)
 set(CMAKE_XCODE_ATTRIBUTE_DEAD_CODE_STRIPPING YES)
 
 add_compile_definitions(RPCS3_IOS=1)
+if(RPCS3_IOS_ENABLE_LLVM)
+    # WITH_LLVM is private to rpcs3_emu upstream. Framework and frontend bridge
+    # sources need a target-independent capability marker when sanitizing user
+    # configuration values.
+    add_compile_definitions(RPCS3_IOS_HAS_LLVM=1)
+endif()
 
 # Desktop defaults such as -march=native and host package discovery are not
 # valid while cross-compiling for an iPhone or iPad.
