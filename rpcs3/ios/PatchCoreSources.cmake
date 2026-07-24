@@ -60,6 +60,43 @@ if(TARGET rpcs3_emu)
     target_sources(rpcs3_emu PRIVATE "${_vm_generated}")
 endif()
 
+# A static archive can hide unresolved references until a later application
+# target consumes it. The core milestone therefore includes a small UIKit app
+# that force-loads every object from rpcs3_emu and performs a complete final
+# link against its transitive dependency graph. Building rpcs3_ios_core now
+# necessarily builds this application target as well as the reusable archive.
+if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_link)
+    add_executable(rpcs3_ios_core_link MACOSX_BUNDLE
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/CoreLinkMain.mm"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/CoreAnchor.cpp")
+
+    target_compile_features(rpcs3_ios_core_link PRIVATE cxx_std_23)
+    target_link_options(rpcs3_ios_core_link PRIVATE "-ObjC")
+    target_link_libraries(rpcs3_ios_core_link PRIVATE
+        "$<LINK_LIBRARY:WHOLE_ARCHIVE,rpcs3_emu>"
+        rpcs3_ios_platform)
+
+    set_target_properties(rpcs3_ios_core_link PROPERTIES
+        OUTPUT_NAME "RPCS3 iOS Core"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/rpcs3/ios/Info.plist.in"
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "net.rpcs3.ios.core"
+        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+        XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+        XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "iphoneos iphonesimulator"
+        XCODE_ATTRIBUTE_SUPPORTS_MACCATALYST "NO"
+        XCODE_ATTRIBUTE_SKIP_INSTALL "NO")
+
+    if(RPCS3_IOS_ENTITLEMENTS_FILE)
+        set_target_properties(rpcs3_ios_core_link PROPERTIES
+            XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${RPCS3_IOS_ENTITLEMENTS_FILE}")
+    elseif(RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS)
+        set_target_properties(rpcs3_ios_core_link PROPERTIES
+            XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_SOURCE_DIR}/rpcs3/ios/JIT.entitlements")
+    endif()
+
+    add_dependencies(rpcs3_ios_core rpcs3_ios_core_link)
+endif()
+
 if(TARGET rpcs3_ui)
     # Qt creates UIApplication while constructing gui_application. Initialize
     # native services immediately after that application object exists rather
@@ -70,7 +107,7 @@ if(TARGET rpcs3_ui)
 
     set(_frontend_include_anchor "#include \"Emu/savestate_utils.hpp\"")
     set(_frontend_include_replacement "#include \"Emu/savestate_utils.hpp\"\n#include \"ios/IOSRuntimeIntegration.h\"")
-    string(REPLACE "${_frontend_include_anchor}" "${_frontend_include_replacement}" _frontend_contents "${_frontend_contents}")
+    string(REPLACE "${_frontend_include_anchor}" "${_frontend_replacement}" _frontend_contents "${_frontend_contents}")
 
     set(_frontend_init_anchor "\tapp->setOrganizationName(\"RPCS3\");")
     set(_frontend_init_replacement "\tapp->setOrganizationName(\"RPCS3\");\n\trpcs3::ios::initialize_rpcs3_runtime();")
