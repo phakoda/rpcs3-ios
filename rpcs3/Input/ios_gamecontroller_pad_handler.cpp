@@ -101,6 +101,7 @@ ios_gamecontroller_pad_handler::~ios_gamecontroller_pad_handler()
         if (device && device->controller_index != umax)
         {
             rpcs3::ios::set_combined_controller_rumble(device->controller_index, 0.0f, 0.0f);
+            rpcs3::ios::set_combined_controller_light(device->controller_index, 0.0f, 0.0f, 0.0f);
         }
     }
 }
@@ -228,6 +229,7 @@ pad_capabilities ios_gamecontroller_pad_handler::get_capabilities(const std::str
     }
 
     pad_capabilities result;
+    result.has_led = native_capabilities.has_light;
     result.has_rumble = native_capabilities.has_haptics;
     result.has_accel = native_capabilities.has_motion;
     result.has_gyro = native_capabilities.has_motion;
@@ -390,11 +392,17 @@ void ios_gamecontroller_pad_handler::apply_pad_data(const pad_ensemble& binding)
     if (capabilities.has_light)
     {
         attempted_output = true;
+        const PadDevice::color color = controller->color_override_active
+            ? controller->color_override
+            : PadDevice::color{
+                static_cast<u8>(controller->config->colorR.get()),
+                static_cast<u8>(controller->config->colorG.get()),
+                static_cast<u8>(controller->config->colorB.get())};
         output_succeeded &= rpcs3::ios::set_combined_controller_light(
             controller->controller_index,
-            controller->config->colorR.get() / 255.0f,
-            controller->config->colorG.get() / 255.0f,
-            controller->config->colorB.get() / 255.0f);
+            color.r / 255.0f,
+            color.g / 255.0f,
+            color.b / 255.0f);
     }
 
     if (!attempted_output || output_succeeded)
