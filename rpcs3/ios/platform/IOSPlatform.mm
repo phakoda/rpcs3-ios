@@ -24,16 +24,36 @@ using namespace rpcs3::ios;
 std::mutex g_callbacks_mutex;
 lifecycle_callbacks g_callbacks;
 std::atomic_bool g_initialized = false;
+std::atomic_bool g_audio_mix_with_others = false;
+std::atomic_bool g_audio_respect_silent_mode = false;
 
-std::string to_string(NSString* value)
+std::string utf8_string(NSString* value)
 {
     if (!value)
     {
         return {};
     }
 
-    const char* utf8 = value.fileSystemRepresentation;
+    const char* utf8 = value.UTF8String;
     return utf8 ? std::string(utf8) : std::string{};
+}
+
+std::string path_string(NSString* value)
+{
+    if (!value)
+    {
+        return {};
+    }
+
+    const char* path = value.fileSystemRepresentation;
+    return path ? std::string(path) : std::string{};
+}
+
+NSString* ns_path(const std::string& value)
+{
+    return [[NSString alloc] initWithBytes:value.data()
+                                    length:value.size()
+                                  encoding:NSUTF8StringEncoding];
 }
 
 std::string with_trailing_slash(std::string path)
@@ -64,11 +84,11 @@ void set_error(std::string* output, NSError* error)
 {
     if (output)
     {
-        *output = to_string(error_text(error));
+        *output = utf8_string(error_text(error));
     }
 }
 
-void invoke_callback(const std::function<void()>& lifecycle_callbacks::* member)
+void invoke_callback(std::function<void()> lifecycle_callbacks::* member)
 {
     std::function<void()> callback;
     {
@@ -102,11 +122,11 @@ NSURL* directory_url(NSSearchPathDirectory directory, NSString* child, bool crea
 
     if (create)
     {
-        [[NSFileManager defaultManager] createDirectoryAtURL:url
-                                withIntermediateDirectories:YES
-                                                 attributes:nil
-                                                      error:&error];
-        if (error)
+        error = nil;
+        if (![[NSFileManager defaultManager] createDirectoryAtURL:url
+                                      withIntermediateDirectories:YES
+                                                       attributes:nil
+                                                            error:&error])
         {
             return nil;
         }
@@ -143,11 +163,11 @@ runtime_paths build_runtime_paths()
                                                       error:&error];
     }
 
-    result.application_support = with_trailing_slash(to_string(support.path));
-    result.caches = with_trailing_slash(to_string(caches.path));
-    result.documents = with_trailing_slash(to_string(documents.path));
-    result.imports = with_trailing_slash(to_string(imports.path));
-    result.temporary = with_trailing_slash(to_string(temporary.path));
+    result.application_support = with_trailing_slash(path_string(support.path));
+    result.caches = with_trailing_slash(path_string(caches.path));
+    result.documents = with_trailing_slash(path_string(documents.path));
+    result.imports = with_trailing_slash(path_string(imports.path));
+    result.temporary = with_trailing_slash(path_string(temporary.path));
     return result;
 }
 
@@ -170,7 +190,7 @@ bool entitlement_is_true(CFStringRef entitlement)
     bool enabled = false;
     if (value && CFGetTypeID(value) == CFBooleanGetTypeID())
     {
-        enabled = CFBooleanGetValue(static_cast<CFBooleanRef>(value));
+        enabled = CFBooleanGetValue((CFBooleanRef)value);
     }
 
     if (value)
@@ -188,7 +208,7 @@ bool entitlement_is_true(CFStringRef entitlement)
 NSURL* unique_import_destination(NSURL* source_url)
 {
     const runtime_paths paths = cached_runtime_paths();
-    NSURL* imports_url = [NSURL fileURLWithPath:@(paths.imports.c_str()) isDirectory:YES];
+    NSURL* imports_url = [NSURL fileURLWithPath:ns_path(paths.imports) isDirectory:YES];
     NSString* filename = source_url.lastPathComponent.length > 0 ? source_url.lastPathComponent : @"Imported Item";
     NSURL* destination = [imports_url URLByAppendingPathComponent:filename];
 
@@ -247,7 +267,7 @@ bool import_url(NSURL* source_url, std::string* imported_path, std::string* erro
 
     if (imported_path)
     {
-        *imported_path = to_string(destination.path);
+        *imported_path = path_string(destination.path);
     }
     return true;
 }
@@ -262,11 +282,11 @@ UIViewController* top_view_controller(UIViewController* controller)
 
     if ([current isKindOfClass:UINavigationController.class])
     {
-        return top_view_controller(static_cast<UINavigationController*>(current).visibleViewController);
+        return top_view_controller(((UINavigationController*)current).visibleViewController);
     }
     if ([current isKindOfClass:UITabBarController.class])
     {
-        return top_view_controller(static_cast<UITabBarController*>(current).selectedViewController);
+        return top_view_controller(((UITabBarController*)current).selectedViewController);
     }
     return current;
 }
@@ -280,7 +300,7 @@ UIViewController* active_presenter()
             continue;
         }
 
-        for (UIWindow* window in static_cast<UIWindowScene*>(scene).windows)
+        for (UIWindow* window in ((UIWindowScene*)scene).windows)
         {
             if (window.isKeyWindow && window.rootViewController)
             {
@@ -374,7 +394,7 @@ UIViewController* active_presenter()
 {
     (void)notification;
     std::string ignored;
-    rpcs3::ios::configure_audio_session(false, false, &ignored);
+    rpcs3::ios::configure_audio_session(g_audio_mix_with_others, g_audio_respect_silent_mode, &ignored);
 }
 
 - (void)controllerChanged:(NSNotification*)notification
@@ -459,19 +479,17 @@ void initialize()
     std::string ignored;
     prepare_runtime_directories(&ignored);
 
-    const auto install_observer = []
+    if (NSThread.isMainThread)
     {
         g_observer = [[RPCS3PlatformObserver alloc] init];
         g_import_delegates = [[NSMutableSet alloc] init];
-    };
-
-    if (NSThread.isMainThread)
-    {
-        install_observer();
     }
     else
     {
-        dispatch_sync(dispatch_get_main_queue(), install_observer);
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            g_observer = [[RPCS3PlatformObserver alloc] init];
+            g_import_delegates = [[NSMutableSet alloc] init];
+        });
     }
 }
 
@@ -482,20 +500,19 @@ void shutdown()
         return;
     }
 
-    const auto remove_observer = []
+    if (NSThread.isMainThread)
     {
         g_observer = nil;
         [g_import_delegates removeAllObjects];
         g_import_delegates = nil;
-    };
-
-    if (NSThread.isMainThread)
-    {
-        remove_observer();
     }
     else
     {
-        dispatch_sync(dispatch_get_main_queue(), remove_observer);
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            g_observer = nil;
+            [g_import_delegates removeAllObjects];
+            g_import_delegates = nil;
+        });
     }
 
     deactivate_audio_session();
@@ -530,7 +547,7 @@ bool prepare_runtime_directories(std::string* error)
         }
 
         NSError* create_error = nil;
-        NSURL* url = [NSURL fileURLWithPath:@(path.c_str()) isDirectory:YES];
+        NSURL* url = [NSURL fileURLWithPath:ns_path(path) isDirectory:YES];
         if (![[NSFileManager defaultManager] createDirectoryAtURL:url
                                       withIntermediateDirectories:YES
                                                        attributes:nil
@@ -560,25 +577,29 @@ bool configure_audio_session(bool mix_with_others, bool respect_silent_mode, std
         return false;
     }
 
-    [session setPreferredSampleRate:48000.0 error:&session_error];
-    if (session_error)
+    session_error = nil;
+    if (![session setPreferredSampleRate:48000.0 error:&session_error])
     {
         set_error(error, session_error);
         return false;
     }
 
-    [session setPreferredIOBufferDuration:(256.0 / 48000.0) error:&session_error];
-    if (session_error)
+    session_error = nil;
+    if (![session setPreferredIOBufferDuration:(256.0 / 48000.0) error:&session_error])
     {
         set_error(error, session_error);
         return false;
     }
 
+    session_error = nil;
     if (![session setActive:YES error:&session_error])
     {
         set_error(error, session_error);
         return false;
     }
+
+    g_audio_mix_with_others = mix_with_others;
+    g_audio_respect_silent_mode = respect_silent_mode;
     return true;
 }
 
@@ -634,7 +655,7 @@ std::vector<controller_state> get_controller_states()
         controller_state state;
         state.connected = true;
         state.player_index = controller.playerIndex == GCControllerPlayerIndexUnset ? -1 : static_cast<int>(controller.playerIndex);
-        state.vendor_name = controller.vendorName ? std::string(controller.vendorName.UTF8String) : std::string{};
+        state.vendor_name = utf8_string(controller.vendorName);
 
         GCExtendedGamepad* gamepad = controller.extendedGamepad;
         if (gamepad)
@@ -675,7 +696,8 @@ void set_lifecycle_callbacks(lifecycle_callbacks callbacks)
 
 void present_import_picker(void* presenter, bool allow_directories, import_callback callback)
 {
-    auto work = [presenter, allow_directories, callback = std::move(callback)]() mutable
+    auto work = std::make_shared<std::function<void()>>();
+    *work = [presenter, allow_directories, callback = std::move(callback)]() mutable
     {
         UIViewController* controller = presenter ? (__bridge UIViewController*)presenter : active_presenter();
         if (!controller)
@@ -700,11 +722,13 @@ void present_import_picker(void* presenter, bool allow_directories, import_callb
 
     if (NSThread.isMainThread)
     {
-        work();
+        (*work)();
     }
     else
     {
-        dispatch_async(dispatch_get_main_queue(), std::move(work));
+        dispatch_async(dispatch_get_main_queue(), ^{
+            (*work)();
+        });
     }
 }
 
@@ -722,6 +746,14 @@ bool import_item(std::string_view source_path, std::string* imported_path, std::
     NSString* path = [[NSString alloc] initWithBytes:source_path.data()
                                              length:source_path.size()
                                            encoding:NSUTF8StringEncoding];
+    if (!path)
+    {
+        if (error)
+        {
+            *error = "The import source path is not valid UTF-8.";
+        }
+        return false;
+    }
     return import_url([NSURL fileURLWithPath:path], imported_path, error);
 }
 }
