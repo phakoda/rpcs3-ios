@@ -132,7 +132,7 @@ cmake --build build-ios-device-core \
 
 1. **Low-level final-link artifact** — force-loads every object from `rpcs3_emu`, so unresolved core, Objective-C++, dependency, and Apple-framework symbols cannot remain hidden in a static archive.
 2. **`RPCS3Core.framework`** — whole-archives the adapted emulator core behind a stable C ABI, explicit module map, hidden internal C++ visibility, exported-symbol list, and linker map.
-3. **`RPCS3 iOS Core.app`** — imports only `RPCS3Core.h`, embeds the framework, imports security-scoped content, issues headless boot requests, and exposes pause, resume, stop, state, metadata, event, JIT, and diagnostics controls.
+3. **`RPCS3 iOS Core.app`** — imports only `RPCS3Core.h`, embeds the framework, supplies a CAMetalLayer-backed UIKit view, imports security-scoped content, issues boot requests, and exposes pause, resume, stop, state, metadata, event, JIT, and diagnostics controls.
 
 The small `rpcs3_ios_core_archive` CMake target is a dependency wrapper, not a standalone monolithic `.a`. Use `RPCS3Core.framework` for embedding.
 
@@ -143,23 +143,24 @@ cmake --build build-ios-device-core --config Release --target rpcs3_ios_core_fra
 cmake --build build-ios-device-core --config Release --target rpcs3_ios_core_link
 ```
 
-The core framework currently uses a **Null RSX output**. Its lifecycle API reaches the real RPCS3 `Emulator` object and includes native GameController pad initialization and Cubeb/null audio selection, but a UIKit/Metal renderer host remains separate work.
+The framework selects Vulkan/MoltenVK when the host supplies a live `UIView` backed by `CAMetalLayer` before boot. Without a render view it uses `NullGSRender`. The UIKit consumer demonstrates the render-view API, but actual frame presentation and RSX compatibility remain unproven until an Apple build and legal workload are exercised.
 
 ### Public framework API
 
 `RPCS3Core/RPCS3Core.h` exposes C-compatible functions for:
 
 - initialization and ordered shutdown;
+- host render-view attachment, clearing, and status;
 - event callbacks;
 - security-scoped import into `Documents/Imports`;
-- headless boot, restart, pause, resume, and stop;
+- boot, restart, pause, resume, and stop;
 - emulator state, title, title ID, and boot path;
 - sandbox paths;
 - JIT and memory status;
 - diagnostics and error strings;
 - MoltenVK default configuration.
 
-The import API supports a normal two-call buffer-size pattern without copying the selected item twice.
+The render view may be changed only while emulation is stopped. It must remain alive while attached. The import API supports a normal two-call buffer-size pattern without copying the selected item twice.
 
 ### Unsupported host peripherals
 
@@ -229,7 +230,7 @@ python3 buildfiles/ios/validate_core.py
 for helper in buildfiles/ios/*.sh; do bash -n "$helper"; done
 ```
 
-`validate_core.py` checks public-header/implementation/export parity, boot-enum parity, framework whole-archive and embedding contracts, generated Qt-free pad sources, concrete libusb/RtMidi ABIs, FFmpeg ordering, core defaults, and XCFramework packaging. These are structural checks, not Apple target builds.
+`validate_core.py` checks public-header/implementation/export parity, boot-enum parity, framework whole-archive and embedding contracts, render-host contracts, generated Qt-free pad sources, concrete libusb/RtMidi ABIs, FFmpeg ordering, core defaults, and XCFramework packaging. These are structural checks, not Apple target builds.
 
 ## Package the core
 
@@ -345,9 +346,8 @@ Without an Apple build host and prepared runtime, this source work does not esta
 - successful firmware installation or legal workload boot;
 - PPU/SPU interpreter behavior;
 - LLVM/JIT execution under any signing model;
-- MoltenVK compatibility with real RSX workloads;
-- renderer presentation, rotation, backgrounding, or external-display migration;
-- stable audio, input, thermal, or memory behavior on hardware;
+- MoltenVK feature compatibility or actual RSX frame presentation;
+- stable rotation, backgrounding, external-display migration, audio, input, thermal, or memory behavior;
 - full Qt frontend usability.
 
 Those are explicit Apple-build and runtime evidence gates, not assumed results.
