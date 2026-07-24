@@ -1,6 +1,7 @@
 #include "IOSPlatform.h"
 #include "IOSControllerFeatures.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <mutex>
 #include <utility>
@@ -10,9 +11,22 @@ namespace
 std::mutex g_virtual_controller_mutex;
 rpcs3::ios::controller_state g_virtual_controller;
 
+std::vector<rpcs3::ios::controller_state> sorted_hardware_controllers()
+{
+    rpcs3::ios::detail::normalize_hardware_controller_slots();
+    std::vector<rpcs3::ios::controller_state> controllers = rpcs3::ios::get_controller_states();
+    std::stable_sort(controllers.begin(), controllers.end(), [](const auto& lhs, const auto& rhs)
+    {
+        const int lhs_slot = lhs.player_index < 0 ? 1000 : lhs.player_index;
+        const int rhs_slot = rhs.player_index < 0 ? 1000 : rhs.player_index;
+        return lhs_slot < rhs_slot;
+    });
+    return controllers;
+}
+
 std::size_t hardware_controller_count()
 {
-    return rpcs3::ios::get_controller_states().size();
+    return sorted_hardware_controllers().size();
 }
 }
 
@@ -54,7 +68,7 @@ void clear_virtual_controller_state()
 
 std::vector<controller_state> get_combined_controller_states()
 {
-    std::vector<controller_state> controllers = get_controller_states();
+    std::vector<controller_state> controllers = sorted_hardware_controllers();
 
     controller_state virtual_controller;
     if (get_virtual_controller_state(&virtual_controller))
