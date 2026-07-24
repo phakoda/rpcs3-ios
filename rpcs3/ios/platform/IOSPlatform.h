@@ -1,0 +1,102 @@
+#pragma once
+
+#include <functional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace rpcs3::ios
+{
+struct runtime_paths
+{
+    std::string application_support;
+    std::string caches;
+    std::string documents;
+    std::string imports;
+    std::string temporary;
+};
+
+struct jit_capabilities
+{
+    bool map_jit_available = false;
+    bool map_jit_allocation_succeeded = false;
+    bool jit_write_protect_available = false;
+    bool dynamic_codesigning_entitlement = false;
+    bool allow_jit_entitlement = false;
+    bool debugger_entitlement = false;
+    std::string detail;
+};
+
+struct controller_state
+{
+    int player_index = -1;
+    std::string vendor_name;
+    bool connected = false;
+    bool has_extended_gamepad = false;
+
+    float left_x = 0.0f;
+    float left_y = 0.0f;
+    float right_x = 0.0f;
+    float right_y = 0.0f;
+    float left_trigger = 0.0f;
+    float right_trigger = 0.0f;
+
+    bool dpad_up = false;
+    bool dpad_down = false;
+    bool dpad_left = false;
+    bool dpad_right = false;
+    bool button_a = false;
+    bool button_b = false;
+    bool button_x = false;
+    bool button_y = false;
+    bool left_shoulder = false;
+    bool right_shoulder = false;
+    bool left_thumbstick = false;
+    bool right_thumbstick = false;
+    bool menu = false;
+    bool options = false;
+    bool home = false;
+};
+
+struct lifecycle_callbacks
+{
+    std::function<void()> will_resign_active;
+    std::function<void()> did_become_active;
+    std::function<void()> did_enter_background;
+    std::function<void()> will_enter_foreground;
+    std::function<void()> audio_interruption_began;
+    std::function<void()> audio_interruption_ended;
+    std::function<void()> controller_configuration_changed;
+};
+
+using import_callback = std::function<void(std::vector<std::string> imported_paths, std::string error)>;
+
+// Initializes directory creation, application lifecycle observers, audio
+// interruption observers, and controller connection monitoring. Safe to call
+// more than once.
+void initialize();
+void shutdown();
+
+runtime_paths get_runtime_paths();
+bool prepare_runtime_directories(std::string* error = nullptr);
+
+// Configures the process-wide AVAudioSession used by Cubeb/AudioUnit. This does
+// not create an RPCS3 audio backend; it only establishes the iOS session and
+// route policy required before a backend starts.
+bool configure_audio_session(bool mix_with_others, bool respect_silent_mode, std::string* error = nullptr);
+void deactivate_audio_session();
+
+jit_capabilities query_jit_capabilities();
+std::vector<controller_state> get_controller_states();
+
+void set_lifecycle_callbacks(lifecycle_callbacks callbacks);
+
+// Presents the system document picker from a UIViewController pointer. Chosen
+// items are coordinated and copied into Documents/Imports so the emulator can
+// keep stable paths after the security-scoped picker session ends.
+void present_import_picker(void* presenter, bool allow_directories, import_callback callback);
+
+// Copies a single security-scoped item into Documents/Imports. source_path may
+// point to a file or directory returned by a system picker.
+bool import_item(std::string_view source_path, std::string* imported_path, std::string* error = nullptr);
+}
