@@ -212,6 +212,7 @@ bool configure_audio_session(bool mix_with_others, bool respect_silent_mode, std
 void deactivate_audio_session();
 
 jit_capabilities query_jit_capabilities();
+jit_capabilities query_extended_jit_capabilities();
 jit_probe_result run_jit_execution_probe();
 bool allocate_jit_memory(std::size_t size, jit_memory_region* region, std::string* error = nullptr);
 bool publish_jit_memory(jit_memory_region* region, std::size_t offset, std::size_t length, std::string* error = nullptr);
