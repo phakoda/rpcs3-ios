@@ -18,6 +18,7 @@ add_library(rpcs3_ios_platform STATIC
     IOSJITProvider.mm
     IOSPerformance.mm
     IOSControllerFeatures.mm
+    IOSControllerLight.mm
     IOSExternalDisplay.mm
     IOSMoltenVK.mm
     IOSDiagnostics.mm
