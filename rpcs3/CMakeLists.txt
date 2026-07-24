@@ -39,16 +39,46 @@ endif()
 add_subdirectory(Emu)
 
 if(RPCS3_IOS)
-    target_link_libraries(rpcs3_emu PUBLIC rpcs3_ios_platform)
+    target_link_libraries(rpcs3_emu PUBLIC
+        rpcs3_ios_platform
+        3rdparty::ios_system)
 endif()
 
 gen_git_version(${CMAKE_CURRENT_SOURCE_DIR})
 
 if(RPCS3_IOS AND NOT RPCS3_IOS_BUILD_QT_FRONTEND)
-    add_library(rpcs3_ios_core STATIC ios/CoreAnchor.cpp)
+    # Keep an archive product for downstream embedding, but make the public core
+    # milestone an actual iOS Mach-O link. Static archives can contain unresolved
+    # references indefinitely; the force-loaded executable cannot.
+    add_library(rpcs3_ios_core_archive STATIC ios/CoreAnchor.cpp)
+    target_compile_features(rpcs3_ios_core_archive PRIVATE cxx_std_20)
+    target_link_libraries(rpcs3_ios_core_archive PUBLIC
+        rpcs3_emu
+        rpcs3_ios_platform
+        3rdparty::ios_system)
+    set_target_properties(rpcs3_ios_core_archive PROPERTIES
+        OUTPUT_NAME "rpcs3-ios-core"
+        XCODE_ATTRIBUTE_SKIP_INSTALL YES)
+
+    add_executable(rpcs3_ios_core ios/CoreLink.cpp)
     target_compile_features(rpcs3_ios_core PRIVATE cxx_std_20)
-    target_link_libraries(rpcs3_ios_core PUBLIC rpcs3_emu rpcs3_ios_platform)
+    target_link_libraries(rpcs3_ios_core PRIVATE
+        rpcs3_ios_core_archive
+        rpcs3_emu
+        rpcs3_ios_platform
+        3rdparty::ios_system)
+    add_dependencies(rpcs3_ios_core rpcs3_emu)
+
+    # Pull every rpcs3_emu object into the final link instead of only the members
+    # referenced by CoreLink.cpp. This is the core link-completeness contract.
+    target_link_options(rpcs3_ios_core PRIVATE
+        "-ObjC"
+        "-Wl,-force_load,$<TARGET_FILE:rpcs3_emu>")
     set_target_properties(rpcs3_ios_core PROPERTIES
+        OUTPUT_NAME "rpcs3-ios-core-link"
+        XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED NO
+        XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED NO
+        XCODE_ATTRIBUTE_ENABLE_BITCODE NO
         XCODE_ATTRIBUTE_SKIP_INSTALL YES)
     return()
 endif()
@@ -133,6 +163,7 @@ if (NOT ANDROID)
             target_link_options(rpcs3 PRIVATE "-ObjC")
             target_link_libraries(rpcs3 PRIVATE
                 rpcs3_ios_platform
+                3rdparty::ios_system
                 "-framework QuartzCore"
                 "-framework Metal"
                 "-framework IOSurface"
@@ -200,7 +231,6 @@ if (NOT ANDROID)
     if(UNIX AND NOT APPLE)
         # Install the binary
         install(TARGETS rpcs3 RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-        # Install the application icon and menu item
         install(FILES rpcs3.svg
             DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps)
         install(FILES rpcs3.png
@@ -209,7 +239,6 @@ if (NOT ANDROID)
             DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
         install(FILES rpcs3.metainfo.xml
             DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/metainfo)
-        # Install other files
         install(DIRECTORY ../bin/Icons
             DESTINATION ${CMAKE_INSTALL_DATADIR}/rpcs3)
         install(DIRECTORY ../bin/GuiConfigs
