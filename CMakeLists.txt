@@ -156,4 +156,8 @@ if(BUILD_RPCS3_TESTS)
 endif()
 add_subdirectory(rpcs3)
 
+if(RPCS3_IOS)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/rpcs3/ios/PatchCoreSources.cmake")
+endif()
+
 set_directory_properties(PROPERTIES VS_STARTUP_PROJECT rpcs3)
