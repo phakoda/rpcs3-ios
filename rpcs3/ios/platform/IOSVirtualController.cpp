@@ -1,5 +1,6 @@
 #include "IOSPlatform.h"
 
+#include <cstddef>
 #include <mutex>
 #include <utility>
 
@@ -58,10 +59,9 @@ std::vector<controller_state> get_combined_controller_states()
         controllers.emplace_back(std::move(virtual_controller));
     }
 
-    for (usz index = 0; index < controllers.size(); ++index)
+    for (std::size_t index = 0; index < controllers.size(); ++index)
     {
         controllers[index].player_index = static_cast<int>(index);
     }
     return controllers;
-}
 }
