@@ -138,6 +138,7 @@ void set_performance_callback(performance_callback callback);
 void set_idle_timer_disabled(bool disabled);
 
 std::vector<controller_state> get_controller_states();
+std::vector<controller_state> get_combined_controller_states();
 
 // Synthetic controller state used by the native multitouch overlay. Hardware
 // controllers remain separate; input handlers may prepend this state as Player
