@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: bash buildfiles/ios/archive.sh <bootstrap|full>
+Usage: bash buildfiles/ios/archive.sh <bootstrap|core|full>
 
 Optional environment:
   BUILD_DIR        Configured Xcode build directory.
@@ -16,11 +16,12 @@ Optional environment:
 
 Without DEVELOPMENT_TEAM the script produces an unsigned archive and an
 unsigned IPA-shaped ZIP for inspection or supported alternative signing tools.
+The core mode packages the whole-archive final-link harness, not the Qt app.
 EOF
 }
 
 mode="${1:-}"
-if [[ "${mode}" != "bootstrap" && "${mode}" != "full" ]]; then
+if [[ "${mode}" != "bootstrap" && "${mode}" != "core" && "${mode}" != "full" ]]; then
     usage >&2
     exit 64
 fi
@@ -41,15 +42,23 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 configuration="${CONFIGURATION:-Release}"
 output_dir="${OUTPUT_DIR:-${repo_root}/out/ios}"
 
-if [[ "${mode}" == "bootstrap" ]]; then
-    scheme="rpcs3_ios_bootstrap"
-    default_build_dir="${repo_root}/build-ios-device-bootstrap"
-    product_label="RPCS3-iOS-Bootstrap"
-else
-    scheme="rpcs3"
-    default_build_dir="${repo_root}/build-ios-device-full"
-    product_label="RPCS3-iOS"
-fi
+case "${mode}" in
+    bootstrap)
+        scheme="rpcs3_ios_bootstrap"
+        default_build_dir="${repo_root}/build-ios-device-bootstrap"
+        product_label="RPCS3-iOS-Bootstrap"
+        ;;
+    core)
+        scheme="rpcs3_ios_core_link"
+        default_build_dir="${repo_root}/build-ios-device-core"
+        product_label="RPCS3-iOS-Core-Link"
+        ;;
+    full)
+        scheme="rpcs3"
+        default_build_dir="${repo_root}/build-ios-device-full"
+        product_label="RPCS3-iOS"
+        ;;
+esac
 
 build_dir="${BUILD_DIR:-${default_build_dir}}"
 project="${build_dir}/rpcs3.xcodeproj"
