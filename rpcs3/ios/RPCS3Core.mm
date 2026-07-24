@@ -128,6 +128,41 @@ uint8_t rpcs3_ios_core_is_initialized(void)
     return g_initialized.load() ? 1 : 0;
 }
 
+rpcs3_ios_core_result rpcs3_ios_core_import_path(
+    const char* source_path,
+    char* imported_path,
+    size_t imported_path_size,
+    size_t* required_size)
+{
+    if (!g_initialized.load())
+    {
+        return RPCS3_IOS_CORE_NOT_INITIALIZED;
+    }
+    if (!source_path || !*source_path || !required_size)
+    {
+        rpcs3::ios::set_core_last_error("A source path and required-size output are required.");
+        return RPCS3_IOS_CORE_INVALID_ARGUMENT;
+    }
+
+    std::string stable_path;
+    std::string error;
+    if (!rpcs3::ios::import_item(source_path, &stable_path, &error))
+    {
+        rpcs3::ios::set_core_last_error(error.empty() ? "The selected item could not be imported." : error);
+        return RPCS3_IOS_CORE_PLATFORM_ERROR;
+    }
+
+    *required_size = stable_path.size() + 1;
+    if (!imported_path || imported_path_size < *required_size)
+    {
+        return RPCS3_IOS_CORE_BUFFER_TOO_SMALL;
+    }
+
+    std::memcpy(imported_path, stable_path.c_str(), *required_size);
+    rpcs3::ios::set_core_last_error({});
+    return RPCS3_IOS_CORE_SUCCESS;
+}
+
 const char* rpcs3_ios_core_application_support_path(void)
 {
     return refresh_path(g_application_support_path, rpcs3::ios::get_runtime_paths().application_support);
