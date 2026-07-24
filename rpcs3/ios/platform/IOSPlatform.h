@@ -87,6 +87,28 @@ bool configure_audio_session(bool mix_with_others, bool respect_silent_mode, std
 void deactivate_audio_session();
 
 jit_capabilities query_jit_capabilities();
+
+// Switches the current thread between executable mode (true) and writable mode
+// (false) for MAP_JIT-backed memory on Apple arm64. Returns false when the API
+// is unavailable. Callers must still synchronize code publication and flush
+// instruction caches as required by their code generator.
+bool set_jit_write_protection(bool executable_mode);
+
+class jit_write_scope
+{
+public:
+    jit_write_scope();
+    ~jit_write_scope();
+
+    jit_write_scope(const jit_write_scope&) = delete;
+    jit_write_scope& operator=(const jit_write_scope&) = delete;
+
+    bool active() const noexcept;
+
+private:
+    bool m_active = false;
+};
+
 std::vector<controller_state> get_controller_states();
 
 void set_lifecycle_callbacks(lifecycle_callbacks callbacks);
