@@ -126,8 +126,12 @@ if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_fram
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreDefaults.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreEmulator.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreEmulator.h"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreGSFrame.mm"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreGSFrame.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreMouseGyro.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/CoreAnchor.cpp"
+        "${CMAKE_SOURCE_DIR}/rpcs3/rpcs3_version.cpp"
+        "${CMAKE_SOURCE_DIR}/rpcs3/rpcs3_version.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/Input/product_info.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/Input/ios_gamecontroller_pad_handler.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/Input/ios_gamecontroller_pad_handler.h"
@@ -147,6 +151,7 @@ if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_fram
     target_link_libraries(rpcs3_ios_core_framework PRIVATE
         "$<LINK_LIBRARY:WHOLE_ARCHIVE,rpcs3_emu>"
         rpcs3_ios_platform
+        3rdparty::vulkan
         3rdparty::ios_system)
     set_target_properties(rpcs3_ios_core_framework PROPERTIES
         OUTPUT_NAME "RPCS3Core"
@@ -160,6 +165,7 @@ if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_fram
         MACOSX_FRAMEWORK_IDENTIFIER "net.rpcs3.ios.core"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core-Info.plist.in"
         XCODE_ATTRIBUTE_CLANG_ENABLE_MODULES YES
+        XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC YES
         XCODE_ATTRIBUTE_DEAD_CODE_STRIPPING NO
         XCODE_ATTRIBUTE_DEFINES_MODULE YES
         XCODE_ATTRIBUTE_ENABLE_BITCODE NO
@@ -184,6 +190,7 @@ if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_fram
         XCODE_EMBED_FRAMEWORKS "$<TARGET_BUNDLE_DIR:rpcs3_ios_core_framework>"
         XCODE_EMBED_FRAMEWORKS_CODE_SIGN_ON_COPY YES
         XCODE_EMBED_FRAMEWORKS_REMOVE_HEADERS_ON_COPY YES
+        XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC YES
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "net.rpcs3.ios.core.link"
         XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
         XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
@@ -208,7 +215,7 @@ endif()
 if(TARGET rpcs3_ui)
     # Qt creates UIApplication while constructing gui_application. Initialize
     # native services immediately after that application object exists rather
-    # than from main(), where UIKit services are not ready yet.
+    # from main(), where UIKit services are not ready yet.
     set(_frontend_source "${CMAKE_SOURCE_DIR}/rpcs3/rpcs3.cpp")
     set(_frontend_generated "${_ios_generated_dir}/rpcs3_ios.cpp")
     file(READ "${_frontend_source}" _frontend_contents)
