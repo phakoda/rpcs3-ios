@@ -29,6 +29,8 @@ REQUIRED_FILES = (
     "rpcs3/ios/IOSCoreEmulator.mm",
     "rpcs3/ios/IOSCoreGSFrame.h",
     "rpcs3/ios/IOSCoreGSFrame.mm",
+    "rpcs3/ios/IOSCoreLifecycle.h",
+    "rpcs3/ios/IOSCoreLifecycle.cpp",
     "rpcs3/ios/IOSCoreMouseGyro.cpp",
     "rpcs3/ios/RPCS3Core.h",
     "rpcs3/ios/RPCS3Core.mm",
@@ -153,6 +155,7 @@ def validate_link_graph(errors: list[str]) -> None:
         "XCODE_EMBED_FRAMEWORKS",
         "IOSCoreEmulator.mm",
         "IOSCoreGSFrame.mm",
+        "IOSCoreLifecycle.cpp",
         "IOSCoreMouseGyro.cpp",
         "pad_thread_ios_core.cpp",
         "ios_gamecontroller_pad_handler.cpp",
@@ -236,6 +239,7 @@ def validate_core_policy(errors: list[str]) -> None:
     handler_header = read("rpcs3/Input/ios_gamecontroller_pad_handler.h")
     emulator = read("rpcs3/ios/IOSCoreEmulator.mm")
     gs_frame = read("rpcs3/ios/IOSCoreGSFrame.mm")
+    lifecycle = read("rpcs3/ios/IOSCoreLifecycle.cpp")
     consumer = read("rpcs3/ios/CoreLinkMain.mm")
 
     for contract in (
@@ -257,6 +261,10 @@ def validate_core_policy(errors: list[str]) -> None:
     require(errors, "set_core_render_view" in gs_frame, "core render-view storage is missing")
     require(errors, "rpcs3_ios_core_set_render_view" in consumer, "framework consumer does not attach its render view")
     require(errors, "CubebBackend" in emulator, "native audio backend contract is missing")
+    require(errors, "pause_reason_inactive" in lifecycle, "inactive lifecycle pause tracking is missing")
+    require(errors, "pause_reason_audio" in lifecycle, "audio lifecycle pause tracking is missing")
+    require(errors, "install_core_lifecycle_callbacks" in lifecycle, "core lifecycle callback installation is missing")
+    require(errors, "remove_core_lifecycle_callbacks" in lifecycle, "core lifecycle callback removal is missing")
 
 
 def validate_packaging(errors: list[str]) -> None:
