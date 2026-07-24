@@ -6,6 +6,7 @@ on:
       - '.github/workflows/ios-source-validation.yml'
       - 'CMakeLists.txt'
       - '3rdparty/ios.cmake'
+      - '3rdparty/ios/**'
       - 'buildfiles/cmake/ConfigureIOS.cmake'
       - 'buildfiles/ios/**'
       - 'rpcs3/CMakeLists.txt'
@@ -22,6 +23,7 @@ on:
       - '.github/workflows/ios-source-validation.yml'
       - 'CMakeLists.txt'
       - '3rdparty/ios.cmake'
+      - '3rdparty/ios/**'
       - 'buildfiles/cmake/ConfigureIOS.cmake'
       - 'buildfiles/ios/**'
       - 'rpcs3/CMakeLists.txt'
@@ -46,11 +48,12 @@ jobs:
       - name: Validate shell syntax
         shell: bash
         run: |
-          bash -n buildfiles/ios/configure.sh
-          bash -n buildfiles/ios/build_ffmpeg.sh
-          bash -n buildfiles/ios/validate_environment.sh
-          bash -n buildfiles/ios/archive.sh
-          bash -n buildfiles/ios/deploy.sh
+          for helper in buildfiles/ios/*.sh; do
+            bash -n "$helper"
+          done
 
-      - name: Validate iOS source contracts
+      - name: Validate general iOS source contracts
         run: python3 buildfiles/ios/validate_sources.py
+
+      - name: Validate core and final-link contracts
+        run: python3 buildfiles/ios/validate_core.py
