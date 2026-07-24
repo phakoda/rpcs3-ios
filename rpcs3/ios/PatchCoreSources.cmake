@@ -71,6 +71,8 @@ if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_fram
     add_library(rpcs3_ios_core_framework SHARED
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.h"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreDefaults.cpp"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreDefaults.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/CoreAnchor.cpp")
     target_compile_features(rpcs3_ios_core_framework PRIVATE cxx_std_23)
     target_include_directories(rpcs3_ios_core_framework PUBLIC
@@ -148,7 +150,9 @@ if(TARGET rpcs3_ui)
     target_sources(rpcs3_ui PRIVATE
         "${_frontend_generated}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSRuntimeIntegration.cpp"
-        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSRuntimeIntegration.h")
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSRuntimeIntegration.h"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreDefaults.cpp"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreDefaults.h")
 
     # Add the native touch controller above the Metal-backed Qt game view. The
     # overlay feeds the same iOS pad handler as hardware GameController devices.
