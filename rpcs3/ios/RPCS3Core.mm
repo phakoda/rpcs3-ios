@@ -1,4 +1,5 @@
 #include "RPCS3Core.h"
+#include "IOSCoreDefaults.h"
 #include "platform/IOSPlatform.h"
 
 #include <algorithm>
@@ -46,12 +47,6 @@ const char* refresh_path(std::string& storage, const std::string& value)
     storage = value;
     return storage.c_str();
 }
-
-void set_last_error(std::string error)
-{
-    std::lock_guard lock(g_core_mutex);
-    g_last_error = std::move(error);
-}
 }
 
 extern "C"
@@ -69,6 +64,7 @@ rpcs3_ios_core_result rpcs3_ios_core_initialize(void)
 
     rpcs3::ios::configure_moltenvk({});
     rpcs3::ios::initialize();
+    rpcs3::ios::apply_core_compatibility_defaults();
 
     std::string error;
     if (!rpcs3::ios::prepare_runtime_directories(&error))
