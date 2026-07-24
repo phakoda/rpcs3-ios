@@ -4,7 +4,6 @@
 #include <vulkan/vulkan.h>
 
 #include <cstring>
-#include <string>
 #include <vector>
 
 namespace
@@ -105,7 +104,7 @@ NSString* run_vulkan_probe(CAMetalLayer* layer)
 
     VkMetalSurfaceCreateInfoEXT surface_info{};
     surface_info.sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT;
-    surface_info.pLayer = (__bridge CAMetalLayer*)layer;
+    surface_info.pLayer = layer;
 
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     result = create_metal_surface(instance, &surface_info, nullptr, &surface);
@@ -192,7 +191,7 @@ NSString* run_vulkan_probe(CAMetalLayer* layer)
     _metal_view.translatesAutoresizingMaskIntoConstraints = NO;
     _metal_view.hidden = YES;
 
-    CAMetalLayer* metal_layer = static_cast<CAMetalLayer*>(_metal_view.layer);
+    CAMetalLayer* metal_layer = (CAMetalLayer*)_metal_view.layer;
     metal_layer.framebufferOnly = NO;
     metal_layer.contentsScale = UIScreen.mainScreen.scale;
 
@@ -215,7 +214,7 @@ NSString* run_vulkan_probe(CAMetalLayer* layer)
     ]];
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        self->_status_label.text = run_vulkan_probe(static_cast<CAMetalLayer*>(self->_metal_view.layer));
+        self->_status_label.text = run_vulkan_probe((CAMetalLayer*)self->_metal_view.layer);
     });
 }
 @end
