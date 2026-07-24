@@ -53,3 +53,31 @@ target_sources(rpcs3_ui PRIVATE
     "${_frontend_generated}"
     "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSRuntimeIntegration.cpp"
     "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSRuntimeIntegration.h")
+
+# Add the native touch controller above the Metal-backed Qt game view. The
+# overlay feeds the same iOS pad handler as hardware GameController devices.
+set(_gs_frame_source "${CMAKE_SOURCE_DIR}/rpcs3/rpcs3qt/gs_frame.cpp")
+set(_gs_frame_generated "${_ios_generated_dir}/gs_frame_ios.cpp")
+file(READ "${_gs_frame_source}" _gs_frame_contents)
+
+set(_gs_include_anchor "#include \"Input/pad_thread.h\"")
+set(_gs_include_replacement "#include \"Input/pad_thread.h\"\n#include \"ios/platform/IOSPlatform.h\"")
+string(REPLACE "${_gs_include_anchor}" "${_gs_include_replacement}" _gs_frame_contents "${_gs_frame_contents}")
+
+set(_gs_attach_anchor "\tload_gui_settings();")
+set(_gs_attach_replacement "\tload_gui_settings();\n\trpcs3::ios::attach_touch_controller_overlay(handle());")
+string(REPLACE "${_gs_attach_anchor}" "${_gs_attach_replacement}" _gs_frame_contents "${_gs_frame_contents}")
+
+set(_gs_detach_anchor "gs_frame::~gs_frame()\n{")
+set(_gs_detach_replacement "gs_frame::~gs_frame()\n{\n\trpcs3::ios::detach_touch_controller_overlay(handle());")
+string(REPLACE "${_gs_detach_anchor}" "${_gs_detach_replacement}" _gs_frame_contents "${_gs_frame_contents}")
+
+if(NOT _gs_frame_contents MATCHES "attach_touch_controller_overlay" OR NOT _gs_frame_contents MATCHES "detach_touch_controller_overlay")
+    message(FATAL_ERROR "Could not attach the iOS touch controller to gs_frame.cpp")
+endif()
+
+file(WRITE "${_gs_frame_generated}" "${_gs_frame_contents}")
+get_target_property(_rpcs3_ui_sources rpcs3_ui SOURCES)
+list(FILTER _rpcs3_ui_sources EXCLUDE REGEX "(^|/)gs_frame\\.cpp$")
+set_property(TARGET rpcs3_ui PROPERTY SOURCES "${_rpcs3_ui_sources}")
+target_sources(rpcs3_ui PRIVATE "${_gs_frame_generated}")
