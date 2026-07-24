@@ -1,4 +1,4 @@
-# iOS dependency selection for the full RPCS3 target.
+# iOS dependency selection for the RPCS3 core and full application targets.
 #
 # Desktop-only backends are represented by empty interface targets so their
 # feature macros remain disabled. Required cross-built dependencies fail early
@@ -7,6 +7,9 @@
 include(CheckCXXCompilerFlag)
 
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static dependencies for iOS" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "Disable dependency tests while cross-compiling" FORCE)
 
 include("${CMAKE_CURRENT_LIST_DIR}/DetectArchitecture.cmake")
 
@@ -20,6 +23,34 @@ function(rpcs3_ios_add_subdirectory name)
         "${CMAKE_BINARY_DIR}/3rdparty/${name}"
         EXCLUDE_FROM_ALL)
 endfunction()
+
+# Prevent bundled dependencies from producing target executables, examples,
+# tests, documentation, installers, or shared libraries during an iOS build.
+set(protobuf_INSTALL OFF CACHE BOOL "" FORCE)
+set(protobuf_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(protobuf_BUILD_CONFORMANCE OFF CACHE BOOL "" FORCE)
+set(protobuf_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(protobuf_BUILD_PROTOC_BINARIES OFF CACHE BOOL "" FORCE)
+set(protobuf_BUILD_LIBPROTOC OFF CACHE BOOL "" FORCE)
+set(protobuf_BUILD_LIBUPB OFF CACHE BOOL "" FORCE)
+set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(ENABLE_GLSLANG_BINARIES OFF CACHE BOOL "" FORCE)
+set(ENABLE_SPVREMAPPER OFF CACHE BOOL "" FORCE)
+set(ENABLE_CTEST OFF CACHE BOOL "" FORCE)
+set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
+set(BUILD_LIBCURL_DOCS OFF CACHE BOOL "" FORCE)
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(ENABLE_CURL_MANUAL OFF CACHE BOOL "" FORCE)
+set(CURL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(BUILD_RUST_LIBS OFF CACHE BOOL "" FORCE)
+set(WOLFSSL_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(WOLFSSL_CRYPT_TESTS OFF CACHE BOOL "" FORCE)
+set(UPNPC_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(UPNPC_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(UPNPC_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(UPNPC_BUILD_SAMPLE OFF CACHE BOOL "" FORCE)
 
 # Portable foundational libraries.
 rpcs3_ios_add_subdirectory(zlib)
@@ -41,27 +72,85 @@ rpcs3_ios_add_subdirectory(miniupnpc)
 rpcs3_ios_add_subdirectory(fusion)
 rpcs3_ios_add_subdirectory(feralinteractive)
 
+# Public Apple frameworks and system libraries required by the complete core
+# graph. Keeping them on one interface target makes static final links stable
+# and prevents individual dependencies from accidentally resolving macOS SDK
+# variants on the host.
+find_library(RPCS3_IOS_ACCELERATE Accelerate REQUIRED)
+find_library(RPCS3_IOS_AUDIOTOOLBOX AudioToolbox REQUIRED)
+find_library(RPCS3_IOS_AUDIOUNIT AudioUnit REQUIRED)
+find_library(RPCS3_IOS_AVFOUNDATION AVFoundation REQUIRED)
+find_library(RPCS3_IOS_CFNETWORK CFNetwork REQUIRED)
+find_library(RPCS3_IOS_COREAUDIO CoreAudio REQUIRED)
+find_library(RPCS3_IOS_COREFOUNDATION CoreFoundation REQUIRED)
+find_library(RPCS3_IOS_COREGRAPHICS CoreGraphics REQUIRED)
+find_library(RPCS3_IOS_COREHAPTICS CoreHaptics REQUIRED)
+find_library(RPCS3_IOS_COREMEDIA CoreMedia REQUIRED)
+find_library(RPCS3_IOS_COREMOTION CoreMotion REQUIRED)
+find_library(RPCS3_IOS_COREVIDEO CoreVideo REQUIRED)
+find_library(RPCS3_IOS_FOUNDATION Foundation REQUIRED)
+find_library(RPCS3_IOS_GAMECONTROLLER GameController REQUIRED)
+find_library(RPCS3_IOS_IOSURFACE IOSurface REQUIRED)
+find_library(RPCS3_IOS_METAL Metal REQUIRED)
+find_library(RPCS3_IOS_NETWORK Network REQUIRED)
+find_library(RPCS3_IOS_QUARTZCORE QuartzCore REQUIRED)
+find_library(RPCS3_IOS_SECURITY Security REQUIRED)
+find_library(RPCS3_IOS_SYSTEMCONFIGURATION SystemConfiguration REQUIRED)
+find_library(RPCS3_IOS_UIKIT UIKit REQUIRED)
+find_library(RPCS3_IOS_UNIFORMTYPES UniformTypeIdentifiers REQUIRED)
+find_library(RPCS3_IOS_VIDEOTOOLBOX VideoToolbox REQUIRED)
+find_library(RPCS3_IOS_ICONV iconv REQUIRED)
+find_library(RPCS3_IOS_RESOLV resolv REQUIRED)
+find_library(RPCS3_IOS_BZ2 bz2)
+
+add_library(3rdparty_ios_system INTERFACE)
+target_link_libraries(3rdparty_ios_system INTERFACE
+    "${RPCS3_IOS_ACCELERATE}"
+    "${RPCS3_IOS_AUDIOTOOLBOX}"
+    "${RPCS3_IOS_AUDIOUNIT}"
+    "${RPCS3_IOS_AVFOUNDATION}"
+    "${RPCS3_IOS_CFNETWORK}"
+    "${RPCS3_IOS_COREAUDIO}"
+    "${RPCS3_IOS_COREFOUNDATION}"
+    "${RPCS3_IOS_COREGRAPHICS}"
+    "${RPCS3_IOS_COREHAPTICS}"
+    "${RPCS3_IOS_COREMEDIA}"
+    "${RPCS3_IOS_COREMOTION}"
+    "${RPCS3_IOS_COREVIDEO}"
+    "${RPCS3_IOS_FOUNDATION}"
+    "${RPCS3_IOS_GAMECONTROLLER}"
+    "${RPCS3_IOS_IOSURFACE}"
+    "${RPCS3_IOS_METAL}"
+    "${RPCS3_IOS_NETWORK}"
+    "${RPCS3_IOS_QUARTZCORE}"
+    "${RPCS3_IOS_SECURITY}"
+    "${RPCS3_IOS_SYSTEMCONFIGURATION}"
+    "${RPCS3_IOS_UIKIT}"
+    "${RPCS3_IOS_UNIFORMTYPES}"
+    "${RPCS3_IOS_VIDEOTOOLBOX}"
+    "${RPCS3_IOS_ICONV}"
+    "${RPCS3_IOS_RESOLV}")
+if(RPCS3_IOS_BZ2)
+    target_link_libraries(3rdparty_ios_system INTERFACE "${RPCS3_IOS_BZ2}")
+endif()
+add_library(3rdparty::ios_system ALIAS 3rdparty_ios_system)
+
 # Vulkan through a user-provided MoltenVK distribution.
 if(NOT EXISTS "${Vulkan_INCLUDE_DIR}/vulkan/vulkan.h")
     message(FATAL_ERROR
-        "Full iOS builds require Vulkan_INCLUDE_DIR to contain vulkan/vulkan.h")
+        "Core/full iOS builds require Vulkan_INCLUDE_DIR to contain vulkan/vulkan.h")
 endif()
 if(NOT EXISTS "${Vulkan_LIBRARY}")
     message(FATAL_ERROR
-        "Full iOS builds require Vulkan_LIBRARY to point to an iOS MoltenVK library")
+        "Core/full iOS builds require Vulkan_LIBRARY to point to an iOS MoltenVK library")
 endif()
-
-find_library(RPCS3_IOS_METAL Metal REQUIRED)
-find_library(RPCS3_IOS_QUARTZCORE QuartzCore REQUIRED)
-find_library(RPCS3_IOS_IOSURFACE IOSurface REQUIRED)
-find_library(RPCS3_IOS_FOUNDATION Foundation REQUIRED)
 
 if(NOT TARGET Vulkan::Vulkan)
     add_library(Vulkan::Vulkan UNKNOWN IMPORTED GLOBAL)
     set_target_properties(Vulkan::Vulkan PROPERTIES
         IMPORTED_LOCATION "${Vulkan_LIBRARY}"
         INTERFACE_INCLUDE_DIRECTORIES "${Vulkan_INCLUDE_DIR}"
-        INTERFACE_LINK_LIBRARIES "${RPCS3_IOS_METAL};${RPCS3_IOS_QUARTZCORE};${RPCS3_IOS_IOSURFACE};${RPCS3_IOS_FOUNDATION}")
+        INTERFACE_LINK_LIBRARIES "3rdparty_ios_system")
 endif()
 
 add_library(3rdparty_vulkan INTERFACE)
@@ -78,7 +167,7 @@ add_library(3rdparty_glew INTERFACE)
 #   <root>/lib/libavcodec.a (and companion libraries)
 if(NOT EXISTS "${RPCS3_IOS_FFMPEG_ROOT}/include/libavcodec/avcodec.h")
     message(FATAL_ERROR
-        "Full iOS builds require RPCS3_IOS_FFMPEG_ROOT with FFmpeg headers and static libraries")
+        "Core/full iOS builds require RPCS3_IOS_FFMPEG_ROOT with FFmpeg headers and static libraries")
 endif()
 
 set(_rpcs3_ios_ffmpeg_libdir "${RPCS3_IOS_FFMPEG_ROOT}/lib")
@@ -88,25 +177,9 @@ find_library(RPCS3_IOS_AVUTIL NAMES avutil PATHS "${_rpcs3_ios_ffmpeg_libdir}" N
 find_library(RPCS3_IOS_SWSCALE NAMES swscale PATHS "${_rpcs3_ios_ffmpeg_libdir}" NO_DEFAULT_PATH REQUIRED)
 find_library(RPCS3_IOS_SWRESAMPLE NAMES swresample PATHS "${_rpcs3_ios_ffmpeg_libdir}" NO_DEFAULT_PATH REQUIRED)
 
-find_library(RPCS3_IOS_AUDIOTOOLBOX AudioToolbox REQUIRED)
-find_library(RPCS3_IOS_COREMEDIA CoreMedia REQUIRED)
-find_library(RPCS3_IOS_COREVIDEO CoreVideo REQUIRED)
-find_library(RPCS3_IOS_VIDEOTOOLBOX VideoToolbox REQUIRED)
-find_library(RPCS3_IOS_SECURITY Security REQUIRED)
-find_library(RPCS3_IOS_ICONV iconv REQUIRED)
-find_library(RPCS3_IOS_BZ2 bz2)
-
 set(_rpcs3_ios_ffmpeg_platform_libraries
-    "${RPCS3_IOS_AUDIOTOOLBOX}"
-    "${RPCS3_IOS_COREMEDIA}"
-    "${RPCS3_IOS_COREVIDEO}"
-    "${RPCS3_IOS_VIDEOTOOLBOX}"
-    "${RPCS3_IOS_SECURITY}"
-    "${RPCS3_IOS_ICONV}"
+    3rdparty_ios_system
     3rdparty_zlib)
-if(RPCS3_IOS_BZ2)
-    list(APPEND _rpcs3_ios_ffmpeg_platform_libraries "${RPCS3_IOS_BZ2}")
-endif()
 if(RPCS3_IOS_FFMPEG_EXTRA_LIBRARIES)
     list(APPEND _rpcs3_ios_ffmpeg_platform_libraries ${RPCS3_IOS_FFMPEG_EXTRA_LIBRARIES})
 endif()
@@ -116,9 +189,9 @@ target_include_directories(3rdparty_ffmpeg SYSTEM INTERFACE "${RPCS3_IOS_FFMPEG_
 target_link_libraries(3rdparty_ffmpeg INTERFACE
     "${RPCS3_IOS_AVFORMAT}"
     "${RPCS3_IOS_AVCODEC}"
-    "${RPCS3_IOS_AVUTIL}"
     "${RPCS3_IOS_SWSCALE}"
     "${RPCS3_IOS_SWRESAMPLE}"
+    "${RPCS3_IOS_AVUTIL}"
     ${_rpcs3_ios_ffmpeg_platform_libraries})
 
 # Unsupported desktop/peripheral integrations. Keeping these as interface
@@ -171,4 +244,4 @@ add_library(3rdparty::feralinteractive ALIAS 3rdparty_feralinteractive)
 add_library(3rdparty::hidapi ALIAS 3rdparty_hidapi)
 add_library(3rdparty::libusb ALIAS 3rdparty_libusb)
 
-message(STATUS "RPCS3: configured iOS-specific third-party dependencies")
+message(STATUS "RPCS3: configured final-link-complete iOS third-party dependencies")
