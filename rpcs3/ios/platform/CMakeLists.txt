@@ -13,6 +13,8 @@ add_library(rpcs3_ios_platform STATIC
     IOSPlatform.mm
     IOSJIT.mm
     IOSPerformance.mm
+    IOSTouchController.mm
+    IOSVirtualController.cpp
 )
 
 target_compile_features(rpcs3_ios_platform PUBLIC cxx_std_20)
