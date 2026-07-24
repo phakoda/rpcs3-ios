@@ -56,10 +56,12 @@ class ios_gamecontroller_pad_handler final : public PadHandlerBase
 
 public:
     ios_gamecontroller_pad_handler();
+    ~ios_gamecontroller_pad_handler() override;
 
     bool Init() override;
     std::vector<pad_list_entry> list_devices() override;
     void init_config(cfg_pad* cfg) override;
+    u32 get_battery_level(const std::string& pad_id) override;
 
 private:
     std::array<std::vector<std::set<u32>>, PadHandlerBase::button::button_count>
@@ -70,6 +72,8 @@ private:
     bool get_is_left_stick(const std::shared_ptr<PadDevice>& device, u32 key_code) override;
     bool get_is_right_stick(const std::shared_ptr<PadDevice>& device, u32 key_code) override;
     connection update_connection(const std::shared_ptr<PadDevice>& device) override;
+    void get_extended_info(const pad_ensemble& binding) override;
+    void apply_pad_data(const pad_ensemble& binding) override;
     std::unordered_map<u32, u16> get_button_values(const std::shared_ptr<PadDevice>& device) override;
     pad_preview_values get_preview_values(const std::unordered_map<u32, u16>& data, const std::vector<std::string>& buttons) override;
 
