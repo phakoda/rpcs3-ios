@@ -4,7 +4,13 @@
 
 #include "Emu/System.h"
 
+#include <QCoreApplication>
+#include <QEvent>
+#include <QFileOpenEvent>
+#include <QUrl>
+
 #include <atomic>
+#include <memory>
 
 LOG_CHANNEL(ios_log, "IOS");
 
@@ -19,6 +25,47 @@ enum ios_pause_reason : u32
 std::atomic_bool g_ios_runtime_initialized = false;
 std::atomic<u32> g_ios_pause_reasons = 0;
 std::atomic_bool g_ios_paused_emulation = false;
+
+class ios_file_open_filter final : public QObject
+{
+public:
+    using QObject::QObject;
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override
+    {
+        (void)watched;
+        if (!event || event->type() != QEvent::FileOpen)
+        {
+            return false;
+        }
+
+        auto* file_event = static_cast<QFileOpenEvent*>(event);
+        QString path = file_event->file();
+        if (path.isEmpty() && file_event->url().isLocalFile())
+        {
+            path = file_event->url().toLocalFile();
+        }
+        if (path.isEmpty())
+        {
+            ios_log.error("Received an iOS file-open event without a local path.");
+            return true;
+        }
+
+        std::string imported_path;
+        std::string error;
+        if (!rpcs3::ios::import_item(path.toStdString(), &imported_path, &error))
+        {
+            ios_log.error("Could not import Files app item '%s': %s", path.toStdString(), error);
+            return true;
+        }
+
+        ios_log.success("Imported Files app item to '%s'.", imported_path);
+        return true;
+    }
+};
+
+std::unique_ptr<ios_file_open_filter> g_file_open_filter;
 
 void pause_for_ios_reason(u32 reason)
 {
@@ -126,6 +173,12 @@ void initialize_rpcs3_runtime()
     set_idle_timer_disabled(true);
     refresh_touch_controller_visibility();
 
+    if (QCoreApplication* application = QCoreApplication::instance())
+    {
+        g_file_open_filter = std::make_unique<ios_file_open_filter>();
+        application->installEventFilter(g_file_open_filter.get());
+    }
+
     std::string audio_error;
     if (!configure_audio_session(false, false, &audio_error))
     {
@@ -150,6 +203,12 @@ void shutdown_rpcs3_runtime()
     {
         return;
     }
+
+    if (QCoreApplication* application = QCoreApplication::instance(); application && g_file_open_filter)
+    {
+        application->removeEventFilter(g_file_open_filter.get());
+    }
+    g_file_open_filter.reset();
 
     set_touch_controller_overlay_visible(false);
     clear_virtual_controller_state();
