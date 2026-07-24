@@ -142,7 +142,11 @@ bool allocate_jit_memory(std::size_t size, jit_memory_region* region, std::strin
     *region = {};
     size = aligned_jit_size(size);
 
-    void* executable = ::mmap(nullptr, size, PROT_READ | PROT_EXEC,
+    // MAP_JIT mappings must be created with a maximum protection that permits
+    // both code generation and execution before they are split into aliases.
+    // The thread is placed in write mode while creating and protecting them.
+    set_jit_write_protection(false);
+    void* executable = ::mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC,
         MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
     if (executable != MAP_FAILED)
     {
@@ -164,14 +168,22 @@ bool allocate_jit_memory(std::size_t size, jit_memory_region* region, std::strin
 
         if (remap_result == KERN_SUCCESS)
         {
-            const kern_return_t protect_result = mach_vm_protect(
+            const kern_return_t writable_protect_result = mach_vm_protect(
                 mach_task_self(),
                 writable_address,
                 static_cast<mach_vm_size_t>(size),
                 FALSE,
                 VM_PROT_READ | VM_PROT_WRITE);
-            if (protect_result == KERN_SUCCESS)
+            const kern_return_t executable_protect_result = mach_vm_protect(
+                mach_task_self(),
+                reinterpret_cast<mach_vm_address_t>(executable),
+                static_cast<mach_vm_size_t>(size),
+                FALSE,
+                VM_PROT_READ | VM_PROT_EXECUTE);
+
+            if (writable_protect_result == KERN_SUCCESS && executable_protect_result == KERN_SUCCESS)
             {
+                set_jit_write_protection(true);
                 region->writable = reinterpret_cast<void*>(writable_address);
                 region->executable = executable;
                 region->size = size;
@@ -188,6 +200,7 @@ bool allocate_jit_memory(std::size_t size, jit_memory_region* region, std::strin
         MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
     if (shared == MAP_FAILED)
     {
+        set_jit_write_protection(true);
         set_error(error, "MAP_JIT allocation", errno);
         return false;
     }
@@ -196,7 +209,8 @@ bool allocate_jit_memory(std::size_t size, jit_memory_region* region, std::strin
     region->executable = shared;
     region->size = size;
     region->dual_mapped = false;
-    set_jit_write_protection(false);
+    // Shared mappings stay in write mode until publish_jit_memory switches the
+    // current thread back to executable mode.
     return true;
 #endif
 }
