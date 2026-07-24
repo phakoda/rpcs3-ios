@@ -8,6 +8,7 @@
 #include "Emu/System.h"
 #include "Emu/IdManager.h"
 #include "Emu/system_config.h"
+#include "Emu/RSX/GSFrameBase.h"
 #include "Emu/RSX/Null/NullGSRender.h"
 #include "Emu/Audio/AudioBackend.h"
 #include "Emu/Audio/Null/NullAudioBackend.h"
@@ -27,9 +28,12 @@
 #include "util/atomic.hpp"
 #include "util/video_source.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -65,6 +69,16 @@ size_t copy_string(const std::string& value, char* buffer, size_t buffer_size)
     std::memcpy(buffer, value.data(), copied);
     buffer[copied] = '\0';
     return required;
+}
+
+std::string append_path_component(std::string base, std::string_view component)
+{
+    if (!base.empty() && base.back() != '/')
+    {
+        base.push_back('/');
+    }
+    base.append(component);
+    return base;
 }
 
 void deliver_event(rpcs3_ios_core_event event, std::string detail = {})
@@ -222,7 +236,7 @@ EmuCallbacks make_core_callbacks()
     callbacks.get_audio = []() -> std::shared_ptr<AudioBackend>
     {
         std::shared_ptr<AudioBackend> result;
-        if (g_cfg.audio.renderer == audio_renderer::cubeb)
+        if (g_cfg.audio.renderer.get() == audio_renderer::cubeb)
         {
             result = std::make_shared<CubebBackend>();
         }
@@ -258,9 +272,7 @@ EmuCallbacks make_core_callbacks()
     callbacks.get_localized_setting = [](const cfg::_base*, u32) -> std::string { return {}; };
     callbacks.get_photo_path = [](std::string_view name)
     {
-        std::string path = rpcs3::ios::get_runtime_paths().documents;
-        path += name;
-        return path;
+        return append_path_component(rpcs3::ios::get_runtime_paths().documents, name);
     };
     callbacks.play_sound = [](const std::string&, std::optional<f32>) {};
     callbacks.get_image_info = [](const std::string&, std::string& subtype, s32& width, s32& height, s32& orientation)
@@ -492,12 +504,24 @@ rpcs3_ios_boot_result rpcs3_ios_core_restart(void)
         return RPCS3_IOS_BOOT_CORE_NOT_INITIALIZED;
     }
     std::lock_guard lock(g_emulator_api_mutex);
-    const game_boot_result result = Emu.Restart(true, true);
-    if (is_error(result))
+    try
     {
-        rpcs3::ios::set_core_last_error(boot_result_description(result));
+        const game_boot_result result = Emu.Restart(true, true);
+        if (is_error(result))
+        {
+            rpcs3::ios::set_core_last_error(boot_result_description(result));
+        }
+        else
+        {
+            rpcs3::ios::set_core_last_error({});
+        }
+        return static_cast<rpcs3_ios_boot_result>(result);
     }
-    return static_cast<rpcs3_ios_boot_result>(result);
+    catch (const std::exception& exception)
+    {
+        rpcs3::ios::set_core_last_error(std::string("Restart failed: ") + exception.what());
+        return RPCS3_IOS_BOOT_GENERIC_ERROR;
+    }
 }
 
 rpcs3_ios_emulator_state rpcs3_ios_core_emulator_state(void)
