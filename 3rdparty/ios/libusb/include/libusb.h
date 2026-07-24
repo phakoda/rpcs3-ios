@@ -124,11 +124,12 @@ struct libusb_transfer
     unsigned char endpoint;
     unsigned char type;
     unsigned int timeout;
-    unsigned char* buffer;
+    enum libusb_transfer_status status;
     int length;
     int actual_length;
     libusb_transfer_cb_fn callback;
     void* user_data;
+    unsigned char* buffer;
     int num_iso_packets;
     struct libusb_iso_packet_descriptor iso_packet_desc[1];
 };
