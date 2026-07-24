@@ -199,6 +199,11 @@ uint8_t rpcs3_ios_core_has_render_view(void)
     return rpcs3::ios::has_core_render_view() ? 1 : 0;
 }
 
+void rpcs3_ios_core_refresh_render_view(void)
+{
+    rpcs3::ios::refresh_core_render_view();
+}
+
 rpcs3_ios_core_result rpcs3_ios_core_import_path(
     const char* source_path,
     char* imported_path,
