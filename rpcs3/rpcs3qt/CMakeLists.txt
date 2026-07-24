@@ -186,33 +186,108 @@ add_library(rpcs3_ui STATIC
 )
 
 if(RPCS3_IOS)
-    # Keep the shared pad thread source byte-for-byte unchanged in the repository.
-    # The iOS target compiles a generated copy containing only the platform
-    # include and factory case required to instantiate GameController devices.
+    set(_ios_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/ios-generated")
+    file(MAKE_DIRECTORY "${_ios_generated_dir}")
+
+    get_target_property(_rpcs3_ui_sources rpcs3_ui SOURCES)
+    list(FILTER _rpcs3_ui_sources EXCLUDE REGEX "Input/(ds3_pad_handler|ds4_pad_handler|dualsense_pad_handler|evdev_joystick_handler|hid_pad_handler|mm_joystick_handler|ps_move_handler|skateboard_pad_handler|xinput_pad_handler)\\.cpp$")
+    list(FILTER _rpcs3_ui_sources EXCLUDE REGEX "Input/(gui_pad_thread|pad_thread)\\.cpp$")
+    set_property(TARGET rpcs3_ui PROPERTY SOURCES "${_rpcs3_ui_sources}")
+
+    # Generate the gameplay pad factory from upstream source. Unsupported USB/
+    # HID controller types remain serializable but resolve to NullPadHandler on
+    # iOS, while the native GameController implementation is added explicitly.
     set(_pad_thread_source "${CMAKE_CURRENT_SOURCE_DIR}/../Input/pad_thread.cpp")
-    set(_pad_thread_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/ios-generated")
-    set(_pad_thread_generated "${_pad_thread_generated_dir}/pad_thread_ios.cpp")
-    file(MAKE_DIRECTORY "${_pad_thread_generated_dir}")
+    set(_pad_thread_generated "${_ios_generated_dir}/pad_thread_ios.cpp")
     file(READ "${_pad_thread_source}" _pad_thread_contents)
 
-    set(_pad_thread_include_anchor "#include \"ps_move_handler.h\"")
-    set(_pad_thread_include_replacement "#include \"ps_move_handler.h\"\n#include \"ios_gamecontroller_pad_handler.h\"")
-    string(REPLACE "${_pad_thread_include_anchor}" "${_pad_thread_include_replacement}" _pad_thread_contents "${_pad_thread_contents}")
+    foreach(_include IN ITEMS
+        "#include \"ds3_pad_handler.h\"\n"
+        "#include \"ds4_pad_handler.h\"\n"
+        "#include \"dualsense_pad_handler.h\"\n"
+        "#include \"skateboard_pad_handler.h\"\n"
+        "#include \"ps_move_handler.h\"\n")
+        string(REPLACE "${_include}" "" _pad_thread_contents "${_pad_thread_contents}")
+    endforeach()
+    string(REPLACE "#include \"keyboard_pad_handler.h\""
+        "#include \"keyboard_pad_handler.h\"\n#include \"ios_gamecontroller_pad_handler.h\""
+        _pad_thread_contents "${_pad_thread_contents}")
 
-    set(_pad_thread_factory_anchor "\tcase pad_handler::move:\n\t\treturn std::make_shared<ps_move_handler>();")
-    set(_pad_thread_factory_replacement "\tcase pad_handler::move:\n\t\treturn std::make_shared<ps_move_handler>();\n\tcase pad_handler::ios_gamecontroller:\n\t\treturn std::make_shared<ios_gamecontroller_pad_handler>();")
-    string(REPLACE "${_pad_thread_factory_anchor}" "${_pad_thread_factory_replacement}" _pad_thread_contents "${_pad_thread_contents}")
+    foreach(_handler IN ITEMS ds3 ds4 dualsense skateboard move)
+        if(_handler STREQUAL "ds3")
+            set(_class ds3_pad_handler)
+        elseif(_handler STREQUAL "ds4")
+            set(_class ds4_pad_handler)
+        elseif(_handler STREQUAL "dualsense")
+            set(_class dualsense_pad_handler)
+        elseif(_handler STREQUAL "skateboard")
+            set(_class skateboard_pad_handler)
+        else()
+            set(_class ps_move_handler)
+        endif()
+        string(REPLACE
+            "\tcase pad_handler::${_handler}:\n\t\treturn std::make_shared<${_class}>();"
+            "\tcase pad_handler::${_handler}:\n\t\treturn std::make_shared<NullPadHandler>();"
+            _pad_thread_contents "${_pad_thread_contents}")
+    endforeach()
+    string(REPLACE
+        "\tcase pad_handler::move:\n\t\treturn std::make_shared<NullPadHandler>();"
+        "\tcase pad_handler::move:\n\t\treturn std::make_shared<NullPadHandler>();\n\tcase pad_handler::ios_gamecontroller:\n\t\treturn std::make_shared<ios_gamecontroller_pad_handler>();"
+        _pad_thread_contents "${_pad_thread_contents}")
 
     if(NOT _pad_thread_contents MATCHES "case pad_handler::ios_gamecontroller")
-        message(FATAL_ERROR "Could not inject the iOS GameController factory into pad_thread.cpp")
+        message(FATAL_ERROR "Could not inject the iOS GameController gameplay factory into pad_thread.cpp")
     endif()
-
     file(WRITE "${_pad_thread_generated}" "${_pad_thread_contents}")
-    get_target_property(_rpcs3_ui_sources rpcs3_ui SOURCES)
-    list(FILTER _rpcs3_ui_sources EXCLUDE REGEX "Input/pad_thread\\.cpp$")
-    set_property(TARGET rpcs3_ui PROPERTY SOURCES "${_rpcs3_ui_sources}")
+
+    # Generate the GUI-navigation factory. Carbon keyboard event injection is a
+    # macOS-only implementation and is disabled for the iOS Qt platform plugin.
+    set(_gui_pad_source "${CMAKE_CURRENT_SOURCE_DIR}/../Input/gui_pad_thread.cpp")
+    set(_gui_pad_generated "${_ios_generated_dir}/gui_pad_thread_ios.cpp")
+    file(READ "${_gui_pad_source}" _gui_pad_contents)
+
+    foreach(_include IN ITEMS
+        "#include \"ds3_pad_handler.h\"\n"
+        "#include \"ds4_pad_handler.h\"\n"
+        "#include \"dualsense_pad_handler.h\"\n")
+        string(REPLACE "${_include}" "" _gui_pad_contents "${_gui_pad_contents}")
+    endforeach()
+    string(REPLACE "#include \"keyboard_pad_handler.h\""
+        "#include \"keyboard_pad_handler.h\"\n#include \"ios_gamecontroller_pad_handler.h\""
+        _gui_pad_contents "${_gui_pad_contents}")
+    string(REPLACE "#ifdef __APPLE__\n#include <ApplicationServices/ApplicationServices.h>"
+        "#if defined(__APPLE__) && !defined(RPCS3_IOS)\n#include <ApplicationServices/ApplicationServices.h>"
+        _gui_pad_contents "${_gui_pad_contents}")
+    string(REPLACE "#ifdef __APPLE__\n\t\tCGEventSourceRef source"
+        "#if defined(__APPLE__) && !defined(RPCS3_IOS)\n\t\tCGEventSourceRef source"
+        _gui_pad_contents "${_gui_pad_contents}")
+
+    foreach(_handler IN ITEMS ds3 ds4 dualsense)
+        if(_handler STREQUAL "ds3")
+            set(_class ds3_pad_handler)
+        elseif(_handler STREQUAL "ds4")
+            set(_class ds4_pad_handler)
+        else()
+            set(_class dualsense_pad_handler)
+        endif()
+        string(REPLACE
+            "\tcase pad_handler::${_handler}:\n\t\treturn std::make_unique<${_class}>();"
+            "\tcase pad_handler::${_handler}:\n\t\treturn nullptr;"
+            _gui_pad_contents "${_gui_pad_contents}")
+    endforeach()
+    string(REPLACE
+        "\tcase pad_handler::move:\n\tcase pad_handler::skateboard:\n\t\treturn nullptr;"
+        "\tcase pad_handler::move:\n\tcase pad_handler::skateboard:\n\t\treturn nullptr;\n\tcase pad_handler::ios_gamecontroller:\n\t\treturn std::make_unique<ios_gamecontroller_pad_handler>();"
+        _gui_pad_contents "${_gui_pad_contents}")
+
+    if(NOT _gui_pad_contents MATCHES "case pad_handler::ios_gamecontroller")
+        message(FATAL_ERROR "Could not inject the iOS GameController GUI factory into gui_pad_thread.cpp")
+    endif()
+    file(WRITE "${_gui_pad_generated}" "${_gui_pad_contents}")
+
     target_sources(rpcs3_ui PRIVATE
         "${_pad_thread_generated}"
+        "${_gui_pad_generated}"
         ../Input/ios_gamecontroller_pad_handler.cpp
         ../Input/ios_gamecontroller_pad_handler.h)
     target_include_directories(rpcs3_ui PRIVATE
@@ -226,7 +301,7 @@ endif()
 
 if(WIN32)
     target_sources(rpcs3_ui PRIVATE "../windows.qrc")
-    set_source_files_properties("../windows.qrc" PROPERTIES 
+    set_source_files_properties("../windows.qrc" PROPERTIES
         RCC_OPTIONS "--include;${CMAKE_CURRENT_SOURCE_DIR}/../qt/etc/qt.conf"
     )
     target_compile_definitions(rpcs3_ui PRIVATE UNICODE _UNICODE)
