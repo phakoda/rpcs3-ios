@@ -27,6 +27,29 @@ struct jit_capabilities
     std::string detail;
 };
 
+enum class thermal_state
+{
+    nominal,
+    fair,
+    serious,
+    critical,
+    unknown,
+};
+
+enum class performance_event
+{
+    thermal_state_changed,
+    low_power_mode_changed,
+    memory_warning,
+};
+
+struct performance_state
+{
+    thermal_state thermal = thermal_state::unknown;
+    bool low_power_mode = false;
+    unsigned long long physical_memory = 0;
+};
+
 struct controller_state
 {
     int player_index = -1;
@@ -69,6 +92,7 @@ struct lifecycle_callbacks
     std::function<void()> controller_configuration_changed;
 };
 
+using performance_callback = std::function<void(performance_event event, performance_state state)>;
 using import_callback = std::function<void(std::vector<std::string> imported_paths, std::string error)>;
 
 // Initializes directory creation, application lifecycle observers, audio
@@ -108,6 +132,10 @@ public:
 private:
     bool m_active = false;
 };
+
+performance_state get_performance_state();
+void set_performance_callback(performance_callback callback);
+void set_idle_timer_disabled(bool disabled);
 
 std::vector<controller_state> get_controller_states();
 
