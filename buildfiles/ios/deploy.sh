@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: bash buildfiles/ios/deploy.sh <simulator|device> <bootstrap|full>
+Usage: bash buildfiles/ios/deploy.sh <simulator|device> <bootstrap|core|full>
 
 Optional environment:
   BUILD_DIR       Configured Xcode build directory.
@@ -13,6 +13,7 @@ Optional environment:
                   physical devices unless exactly one eligible device exists.
   LAUNCH=1        Launch after installation when a bundle identifier is found.
 
+The core mode installs the whole-archive final-link harness, not the Qt app.
 The device path uses `xcrun devicectl`. A vphone guest can use the same path
 when it is exposed to CoreDevice on the host; the vphone MCP server itself does
 not currently expose an app-install action.
@@ -25,7 +26,7 @@ if [[ "${platform}" != "simulator" && "${platform}" != "device" ]]; then
     usage >&2
     exit 64
 fi
-if [[ "${mode}" != "bootstrap" && "${mode}" != "full" ]]; then
+if [[ "${mode}" != "bootstrap" && "${mode}" != "core" && "${mode}" != "full" ]]; then
     usage >&2
     exit 64
 fi
@@ -38,11 +39,11 @@ fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 configuration="${CONFIGURATION:-Release}"
 
-if [[ "${mode}" == "bootstrap" ]]; then
-    scheme="rpcs3_ios_bootstrap"
-else
-    scheme="rpcs3"
-fi
+case "${mode}" in
+    bootstrap) scheme="rpcs3_ios_bootstrap" ;;
+    core) scheme="rpcs3_ios_core_link" ;;
+    full) scheme="rpcs3" ;;
+esac
 
 if [[ "${platform}" == "simulator" ]]; then
     sdk="iphonesimulator"
