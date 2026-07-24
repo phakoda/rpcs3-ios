@@ -60,6 +60,54 @@ if(TARGET rpcs3_emu)
     target_sources(rpcs3_emu PRIVATE "${_vm_generated}")
 endif()
 
+# Generate a Qt-free gameplay pad thread for RPCS3Core.framework. The upstream
+# pad thread's core state and USB/LDD behavior are retained, unsupported desktop
+# HID factories resolve to NullPadHandler, keyboard-window code is compiled out,
+# and the native GameController implementation is inserted explicitly.
+set(_core_pad_source "${CMAKE_SOURCE_DIR}/rpcs3/Input/pad_thread.cpp")
+set(_core_pad_generated "${_ios_generated_dir}/pad_thread_ios_core.cpp")
+file(READ "${_core_pad_source}" _core_pad_contents)
+foreach(_include IN ITEMS
+    "#include \"ds3_pad_handler.h\"\n"
+    "#include \"ds4_pad_handler.h\"\n"
+    "#include \"dualsense_pad_handler.h\"\n"
+    "#include \"skateboard_pad_handler.h\"\n"
+    "#include \"ps_move_handler.h\"\n")
+    string(REPLACE "${_include}" "" _core_pad_contents "${_core_pad_contents}")
+endforeach()
+string(REPLACE "#include \"Emu/Io/Null/NullPadHandler.h\""
+    "#include \"Emu/Io/Null/NullPadHandler.h\"\n#include \"ios_gamecontroller_pad_handler.h\""
+    _core_pad_contents "${_core_pad_contents}")
+string(REPLACE "#ifndef ANDROID"
+    "#if !defined(ANDROID) && !defined(RPCS3_IOS_CORE)"
+    _core_pad_contents "${_core_pad_contents}")
+foreach(_handler IN ITEMS ds3 ds4 dualsense skateboard move)
+    if(_handler STREQUAL "ds3")
+        set(_class ds3_pad_handler)
+    elseif(_handler STREQUAL "ds4")
+        set(_class ds4_pad_handler)
+    elseif(_handler STREQUAL "dualsense")
+        set(_class dualsense_pad_handler)
+    elseif(_handler STREQUAL "skateboard")
+        set(_class skateboard_pad_handler)
+    else()
+        set(_class ps_move_handler)
+    endif()
+    string(REPLACE
+        "\tcase pad_handler::${_handler}:\n\t\treturn std::make_shared<${_class}>();"
+        "\tcase pad_handler::${_handler}:\n\t\treturn std::make_shared<NullPadHandler>();"
+        _core_pad_contents "${_core_pad_contents}")
+endforeach()
+string(REPLACE
+    "\tcase pad_handler::move:\n\t\treturn std::make_shared<NullPadHandler>();"
+    "\tcase pad_handler::move:\n\t\treturn std::make_shared<NullPadHandler>();\n\tcase pad_handler::ios_gamecontroller:\n\t\treturn std::make_shared<ios_gamecontroller_pad_handler>();"
+    _core_pad_contents "${_core_pad_contents}")
+if(NOT _core_pad_contents MATCHES "case pad_handler::ios_gamecontroller" OR
+   _core_pad_contents MATCHES "std::make_shared<ds3_pad_handler>")
+    message(FATAL_ERROR "Could not generate the Qt-free iOS core pad thread")
+endif()
+file(WRITE "${_core_pad_generated}" "${_core_pad_contents}")
+
 # Build the adapted core in three forms:
 #
 # 1. rpcs3_ios_core_archive is a reusable static archive milestone.
@@ -76,12 +124,23 @@ if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_fram
         "${_rpcs3_core_modulemap}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreDefaults.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreDefaults.h"
-        "${CMAKE_SOURCE_DIR}/rpcs3/ios/CoreAnchor.cpp")
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreEmulator.mm"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreEmulator.h"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreMouseGyro.cpp"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/CoreAnchor.cpp"
+        "${CMAKE_SOURCE_DIR}/rpcs3/Input/product_info.cpp"
+        "${CMAKE_SOURCE_DIR}/rpcs3/Input/ios_gamecontroller_pad_handler.cpp"
+        "${CMAKE_SOURCE_DIR}/rpcs3/Input/ios_gamecontroller_pad_handler.h"
+        "${_core_pad_generated}")
     set_source_files_properties("${_rpcs3_core_modulemap}" PROPERTIES
         MACOSX_PACKAGE_LOCATION Modules)
     target_compile_features(rpcs3_ios_core_framework PRIVATE cxx_std_23)
-    target_include_directories(rpcs3_ios_core_framework PUBLIC
-        "${CMAKE_SOURCE_DIR}/rpcs3/ios")
+    target_compile_definitions(rpcs3_ios_core_framework PRIVATE RPCS3_IOS_CORE=1)
+    target_include_directories(rpcs3_ios_core_framework
+        PUBLIC "${CMAKE_SOURCE_DIR}/rpcs3/ios"
+        PRIVATE
+            "${CMAKE_SOURCE_DIR}/rpcs3"
+            "${CMAKE_SOURCE_DIR}/rpcs3/Input")
     target_link_options(rpcs3_ios_core_framework PRIVATE
         "-ObjC"
         "LINKER:-exported_symbols_list,${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.exports")
@@ -93,16 +152,19 @@ if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_fram
         OUTPUT_NAME "RPCS3Core"
         FRAMEWORK TRUE
         FRAMEWORK_VERSION A
-        VERSION 0.1.0
-        SOVERSION 0.1
+        VERSION 0.2.0
+        SOVERSION 0.2
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN YES
         PUBLIC_HEADER "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.h"
         MACOSX_FRAMEWORK_IDENTIFIER "net.rpcs3.ios.core"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core-Info.plist.in"
         XCODE_ATTRIBUTE_CLANG_ENABLE_MODULES YES
+        XCODE_ATTRIBUTE_DEAD_CODE_STRIPPING NO
         XCODE_ATTRIBUTE_DEFINES_MODULE YES
         XCODE_ATTRIBUTE_ENABLE_BITCODE NO
+        XCODE_ATTRIBUTE_LD_GENERATE_MAP_FILE YES
+        XCODE_ATTRIBUTE_LD_MAP_FILE_PATH "$(TARGET_TEMP_DIR)/$(PRODUCT_NAME)-LinkMap-$(CURRENT_ARCH).txt"
         XCODE_ATTRIBUTE_MODULEMAP_FILE "${_rpcs3_core_modulemap}"
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "net.rpcs3.ios.core"
         XCODE_ATTRIBUTE_SKIP_INSTALL NO)
@@ -124,12 +186,19 @@ if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_fram
         XCODE_EMBED_FRAMEWORKS_REMOVE_HEADERS_ON_COPY YES
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "net.rpcs3.ios.core.link"
         XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-        XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED NO
-        XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED NO
+        XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
         XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "iphoneos iphonesimulator"
         XCODE_ATTRIBUTE_SUPPORTS_MACCATALYST "NO"
         XCODE_ATTRIBUTE_ENABLE_BITCODE NO
-        XCODE_ATTRIBUTE_SKIP_INSTALL YES)
+        XCODE_ATTRIBUTE_SKIP_INSTALL NO)
+
+    if(RPCS3_IOS_ENTITLEMENTS_FILE)
+        set_target_properties(rpcs3_ios_core_link PROPERTIES
+            XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${RPCS3_IOS_ENTITLEMENTS_FILE}")
+    elseif(RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS)
+        set_target_properties(rpcs3_ios_core_link PROPERTIES
+            XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_SOURCE_DIR}/rpcs3/ios/JIT.entitlements")
+    endif()
 
     add_dependencies(rpcs3_ios_core
         rpcs3_ios_core_framework
