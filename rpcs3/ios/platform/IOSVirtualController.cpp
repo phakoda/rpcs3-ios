@@ -47,19 +47,20 @@ void clear_virtual_controller_state()
 
 std::vector<controller_state> get_combined_controller_states()
 {
-    std::vector<controller_state> controllers;
+    std::vector<controller_state> controllers = get_controller_states();
+
+    // A physical controller is the preferred Player 1 device. The native touch
+    // overlay becomes Player 1 only when no GameController device is connected;
+    // otherwise it remains available as the final logical controller.
     controller_state virtual_controller;
     if (get_virtual_controller_state(&virtual_controller))
     {
         controllers.emplace_back(std::move(virtual_controller));
     }
 
-    std::vector<controller_state> hardware = get_controller_states();
-    controllers.reserve(controllers.size() + hardware.size());
-    for (controller_state& controller : hardware)
+    for (usz index = 0; index < controllers.size(); ++index)
     {
-        controller.player_index = static_cast<int>(controllers.size());
-        controllers.emplace_back(std::move(controller));
+        controllers[index].player_index = static_cast<int>(index);
     }
     return controllers;
 }
