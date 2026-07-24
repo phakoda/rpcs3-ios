@@ -1,13 +1,25 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/CAMetalLayer.h>
 
+#include "platform/IOSPlatform.h"
+
 #include <vulkan/vulkan.h>
 
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace
 {
+NSString* const RPCS3ControllerConfigurationChanged = @"RPCS3ControllerConfigurationChanged";
+
+NSString* ns_string(const std::string& value)
+{
+    return [[NSString alloc] initWithBytes:value.data()
+                                    length:value.size()
+                                  encoding:NSUTF8StringEncoding] ?: @"";
+}
+
 bool has_extension(const std::vector<VkExtensionProperties>& extensions, const char* name)
 {
     for (const VkExtensionProperties& extension : extensions)
@@ -75,9 +87,9 @@ NSString* run_vulkan_probe(CAMetalLayer* layer)
     VkApplicationInfo application_info{};
     application_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     application_info.pApplicationName = "RPCS3 iOS bring-up";
-    application_info.applicationVersion = VK_MAKE_API_VERSION(0, 0, 1, 0);
+    application_info.applicationVersion = VK_MAKE_API_VERSION(0, 0, 2, 0);
     application_info.pEngineName = "RPCS3";
-    application_info.engineVersion = VK_MAKE_API_VERSION(0, 0, 1, 0);
+    application_info.engineVersion = VK_MAKE_API_VERSION(0, 0, 2, 0);
     application_info.apiVersion = VK_API_VERSION_1_2;
 
     VkInstanceCreateInfo instance_info{};
@@ -147,6 +159,26 @@ NSString* run_vulkan_probe(CAMetalLayer* layer)
     vkDestroyInstance(instance, nullptr);
     return status;
 }
+
+NSString* controller_summary()
+{
+    const std::vector<rpcs3::ios::controller_state> controllers = rpcs3::ios::get_controller_states();
+    if (controllers.empty())
+    {
+        return @"Controllers: none connected";
+    }
+
+    NSMutableArray<NSString*>* names = [NSMutableArray arrayWithCapacity:controllers.size()];
+    for (const rpcs3::ios::controller_state& controller : controllers)
+    {
+        NSString* name = controller.vendor_name.empty() ? @"Game Controller" : ns_string(controller.vendor_name);
+        [names addObject:[NSString stringWithFormat:@"P%d %@%@",
+            controller.player_index < 0 ? static_cast<int>(names.count + 1) : controller.player_index + 1,
+            name,
+            controller.has_extended_gamepad ? @" (extended)" : @""]];
+    }
+    return [NSString stringWithFormat:@"Controllers: %@", [names componentsJoinedByString:@", "]];
+}
 }
 
 @interface RPCS3MetalView : UIView
@@ -164,8 +196,32 @@ NSString* run_vulkan_probe(CAMetalLayer* layer)
 
 @implementation RPCS3ViewController
 {
-    UILabel* _status_label;
+    UILabel* _graphics_status;
+    UILabel* _platform_status;
+    UILabel* _controller_status;
+    UILabel* _import_status;
     RPCS3MetalView* _metal_view;
+}
+
+- (UILabel*)makeStatusLabel
+{
+    UILabel* label = [[UILabel alloc] init];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    label.numberOfLines = 0;
+    label.textAlignment = NSTextAlignmentCenter;
+    return label;
+}
+
+- (UIButton*)makeButton:(NSString*)title action:(SEL)action
+{
+    UIButton* button = [UIButton buttonWithType:UIButtonTypeSystem];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
+    [button setTitle:title forState:UIControlStateNormal];
+    button.titleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
+    button.configuration = [UIButtonConfiguration borderedProminentButtonConfiguration];
+    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    return button;
 }
 
 - (void)viewDidLoad
@@ -180,12 +236,41 @@ NSString* run_vulkan_probe(CAMetalLayer* layer)
     title_label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleLargeTitle];
     title_label.textAlignment = NSTextAlignmentCenter;
 
-    _status_label = [[UILabel alloc] init];
-    _status_label.translatesAutoresizingMaskIntoConstraints = NO;
-    _status_label.text = @"Checking MoltenVK…";
-    _status_label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-    _status_label.numberOfLines = 0;
-    _status_label.textAlignment = NSTextAlignmentCenter;
+    UILabel* subtitle = [self makeStatusLabel];
+    subtitle.text = @"Native platform and renderer bring-up";
+    subtitle.textColor = UIColor.secondaryLabelColor;
+
+    _graphics_status = [self makeStatusLabel];
+    _graphics_status.text = @"Checking MoltenVK…";
+
+    _platform_status = [self makeStatusLabel];
+    _controller_status = [self makeStatusLabel];
+    _import_status = [self makeStatusLabel];
+    _import_status.textColor = UIColor.secondaryLabelColor;
+    _import_status.text = @"Imported files are copied into Documents/Imports.";
+
+    UIButton* import_files = [self makeButton:@"Import Files" action:@selector(importFiles:)];
+    UIButton* import_folder = [self makeButton:@"Import Folder" action:@selector(importFolder:)];
+
+    UIStackView* button_stack = [[UIStackView alloc] initWithArrangedSubviews:@[import_files, import_folder]];
+    button_stack.translatesAutoresizingMaskIntoConstraints = NO;
+    button_stack.axis = UILayoutConstraintAxisHorizontal;
+    button_stack.spacing = 12.0;
+    button_stack.distribution = UIStackViewDistributionFillEqually;
+
+    UIStackView* stack = [[UIStackView alloc] initWithArrangedSubviews:@[
+        title_label,
+        subtitle,
+        _graphics_status,
+        _platform_status,
+        _controller_status,
+        button_stack,
+        _import_status,
+    ]];
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 18.0;
+    stack.alignment = UIStackViewAlignmentFill;
 
     _metal_view = [[RPCS3MetalView alloc] init];
     _metal_view.translatesAutoresizingMaskIntoConstraints = NO;
@@ -195,27 +280,111 @@ NSString* run_vulkan_probe(CAMetalLayer* layer)
     metal_layer.framebufferOnly = NO;
     metal_layer.contentsScale = UIScreen.mainScreen.scale;
 
-    [self.view addSubview:title_label];
-    [self.view addSubview:_status_label];
+    [self.view addSubview:stack];
     [self.view addSubview:_metal_view];
 
     UILayoutGuide* guide = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [title_label.topAnchor constraintEqualToAnchor:guide.topAnchor constant:32.0],
-        [title_label.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:20.0],
-        [title_label.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-20.0],
-        [_status_label.centerYAnchor constraintEqualToAnchor:guide.centerYAnchor],
-        [_status_label.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:24.0],
-        [_status_label.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-24.0],
+        [stack.centerYAnchor constraintEqualToAnchor:guide.centerYAnchor],
+        [stack.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:24.0],
+        [stack.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-24.0],
         [_metal_view.widthAnchor constraintEqualToConstant:16.0],
         [_metal_view.heightAnchor constraintEqualToConstant:16.0],
         [_metal_view.centerXAnchor constraintEqualToAnchor:guide.centerXAnchor],
         [_metal_view.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor],
     ]];
 
+    [NSNotificationCenter.defaultCenter addObserver:self
+                                           selector:@selector(controllerConfigurationChanged:)
+                                               name:RPCS3ControllerConfigurationChanged
+                                             object:nil];
+
+    [self refreshPlatformStatus];
+    [self refreshControllerStatus];
+
     dispatch_async(dispatch_get_main_queue(), ^{
-        self->_status_label.text = run_vulkan_probe((CAMetalLayer*)self->_metal_view.layer);
+        self->_graphics_status.text = run_vulkan_probe((CAMetalLayer*)self->_metal_view.layer);
     });
+}
+
+- (void)dealloc
+{
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+}
+
+- (void)refreshPlatformStatus
+{
+    const rpcs3::ios::runtime_paths paths = rpcs3::ios::get_runtime_paths();
+    const rpcs3::ios::jit_capabilities jit = rpcs3::ios::query_jit_capabilities();
+    _platform_status.text = [NSString stringWithFormat:@"JIT: %@\nImports: %@",
+        ns_string(jit.detail), ns_string(paths.imports)];
+}
+
+- (void)refreshControllerStatus
+{
+    _controller_status.text = controller_summary();
+}
+
+- (void)controllerConfigurationChanged:(NSNotification*)notification
+{
+    (void)notification;
+    [self refreshControllerStatus];
+}
+
+- (void)importFiles:(UIButton*)sender
+{
+    (void)sender;
+    [self presentImporterAllowingDirectories:false];
+}
+
+- (void)importFolder:(UIButton*)sender
+{
+    (void)sender;
+    [self presentImporterAllowingDirectories:true];
+}
+
+- (void)presentImporterAllowingDirectories:(bool)allow_directories
+{
+    _import_status.text = @"Waiting for document picker…";
+    __weak RPCS3ViewController* weak_self = self;
+    rpcs3::ios::present_import_picker((__bridge void*)self, allow_directories,
+        [weak_self](std::vector<std::string> paths, std::string error)
+    {
+        RPCS3ViewController* strong_self = weak_self;
+        if (!strong_self)
+        {
+            return;
+        }
+
+        if (!error.empty())
+        {
+            strong_self->_import_status.text = [NSString stringWithFormat:@"Import failed: %@", ns_string(error)];
+            return;
+        }
+        if (paths.empty())
+        {
+            strong_self->_import_status.text = @"Import cancelled.";
+            return;
+        }
+
+        NSMutableArray<NSString*>* imported = [NSMutableArray arrayWithCapacity:paths.size()];
+        for (const std::string& path : paths)
+        {
+            [imported addObject:ns_string(path).lastPathComponent];
+        }
+        strong_self->_import_status.text = [NSString stringWithFormat:@"Imported: %@",
+            [imported componentsJoinedByString:@", "]];
+    });
+}
+
+- (BOOL)prefersHomeIndicatorAutoHidden
+{
+    return YES;
+}
+
+- (UIRectEdge)preferredScreenEdgesDeferringSystemGestures
+{
+    return UIRectEdgeAll;
 }
 @end
 
@@ -229,10 +398,32 @@ NSString* run_vulkan_probe(CAMetalLayer* layer)
     (void)application;
     (void)launch_options;
 
+    rpcs3::ios::initialize();
+    rpcs3::ios::set_lifecycle_callbacks({
+        .controller_configuration_changed = []
+        {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [NSNotificationCenter.defaultCenter postNotificationName:RPCS3ControllerConfigurationChanged object:nil];
+            });
+        },
+    });
+
+    std::string audio_error;
+    if (!rpcs3::ios::configure_audio_session(false, false, &audio_error))
+    {
+        NSLog(@"RPCS3 iOS audio session setup failed: %@", ns_string(audio_error));
+    }
+
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     self.window.rootViewController = [[RPCS3ViewController alloc] init];
     [self.window makeKeyAndVisible];
     return YES;
+}
+
+- (void)applicationWillTerminate:(UIApplication*)application
+{
+    (void)application;
+    rpcs3::ios::shutdown();
 }
 @end
 
