@@ -68,16 +68,23 @@ endif()
 # 3. RPCS3 iOS Core.app imports only that public C ABI, proving a consumer can
 #    link the framework without reaching into RPCS3 internals.
 if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_framework)
+    set(_rpcs3_core_modulemap "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.modulemap")
     add_library(rpcs3_ios_core_framework SHARED
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.h"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.exports"
+        "${_rpcs3_core_modulemap}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreDefaults.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreDefaults.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/CoreAnchor.cpp")
+    set_source_files_properties("${_rpcs3_core_modulemap}" PROPERTIES
+        MACOSX_PACKAGE_LOCATION Modules)
     target_compile_features(rpcs3_ios_core_framework PRIVATE cxx_std_23)
     target_include_directories(rpcs3_ios_core_framework PUBLIC
         "${CMAKE_SOURCE_DIR}/rpcs3/ios")
-    target_link_options(rpcs3_ios_core_framework PRIVATE "-ObjC")
+    target_link_options(rpcs3_ios_core_framework PRIVATE
+        "-ObjC"
+        "LINKER:-exported_symbols_list,${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.exports")
     target_link_libraries(rpcs3_ios_core_framework PRIVATE
         "$<LINK_LIBRARY:WHOLE_ARCHIVE,rpcs3_emu>"
         rpcs3_ios_platform
@@ -88,12 +95,15 @@ if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_fram
         FRAMEWORK_VERSION A
         VERSION 0.1.0
         SOVERSION 0.1
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
         PUBLIC_HEADER "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.h"
         MACOSX_FRAMEWORK_IDENTIFIER "net.rpcs3.ios.core"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core-Info.plist.in"
         XCODE_ATTRIBUTE_CLANG_ENABLE_MODULES YES
         XCODE_ATTRIBUTE_DEFINES_MODULE YES
         XCODE_ATTRIBUTE_ENABLE_BITCODE NO
+        XCODE_ATTRIBUTE_MODULEMAP_FILE "${_rpcs3_core_modulemap}"
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "net.rpcs3.ios.core"
         XCODE_ATTRIBUTE_SKIP_INSTALL NO)
 
@@ -109,6 +119,9 @@ if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_fram
     set_target_properties(rpcs3_ios_core_link PROPERTIES
         OUTPUT_NAME "RPCS3 iOS Core"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/rpcs3/ios/Info.plist.in"
+        XCODE_EMBED_FRAMEWORKS "$<TARGET_BUNDLE_DIR:rpcs3_ios_core_framework>"
+        XCODE_EMBED_FRAMEWORKS_CODE_SIGN_ON_COPY YES
+        XCODE_EMBED_FRAMEWORKS_REMOVE_HEADERS_ON_COPY YES
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "net.rpcs3.ios.core.link"
         XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
         XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED NO
