@@ -81,6 +81,21 @@ rpcs3_ios_cpu_mode current_cpu_mode()
     return RPCS3_IOS_CPU_PORTABLE;
 }
 
+rpcs3_ios_configuration configuration_snapshot()
+{
+    return {
+        sizeof(rpcs3_ios_configuration),
+        current_cpu_mode(),
+        g_cfg.audio.renderer.get() == audio_renderer::cubeb ? 1u : 0u,
+        static_cast<uint32_t>(g_cfg.audio.volume.get()),
+        static_cast<uint32_t>(g_cfg.video.resolution_scale_percent.get()),
+        encode_frame_limit(g_cfg.video.frame_limit.get()),
+        g_cfg.video.disable_on_disk_shader_cache.get() ? 0u : 1u,
+        g_cfg.video.perf_overlay.enabled.get() ? 1u : 0u,
+        static_cast<uint32_t>(g_cfg.core.preferred_spu_threads.get()),
+    };
+}
+
 rpcs3_ios_core_result apply_configuration(const rpcs3_ios_configuration& configuration)
 {
     if (configuration.struct_size < sizeof(rpcs3_ios_configuration))
@@ -151,11 +166,16 @@ void persist_configuration(const rpcs3_ios_configuration& configuration)
     [defaults setInteger:configuration.preferred_spu_threads forKey:settings_preferred_spu_threads];
 }
 
-rpcs3_ios_configuration read_persisted_configuration()
+rpcs3_ios_configuration read_persisted_configuration(bool* had_persisted_value)
 {
     NSUserDefaults* defaults = NSUserDefaults.standardUserDefaults;
     rpcs3_ios_configuration configuration = default_configuration();
-    if (![defaults objectForKey:settings_marker])
+    const bool exists = [defaults objectForKey:settings_marker] != nil;
+    if (had_persisted_value)
+    {
+        *had_persisted_value = exists;
+    }
+    if (!exists)
     {
         return configuration;
     }
@@ -177,12 +197,17 @@ namespace rpcs3::ios
 void load_core_configuration()
 {
     std::lock_guard lock(g_settings_mutex);
-    const rpcs3_ios_configuration configuration = read_persisted_configuration();
+    bool persisted = false;
+    const rpcs3_ios_configuration configuration = read_persisted_configuration(&persisted);
     if (apply_configuration(configuration) != RPCS3_IOS_CORE_SUCCESS)
     {
         const rpcs3_ios_configuration fallback = default_configuration();
         apply_configuration(fallback);
         persist_configuration(fallback);
+    }
+    else if (!persisted)
+    {
+        persist_configuration(configuration_snapshot());
     }
 }
 }
@@ -198,17 +223,8 @@ rpcs3_ios_core_result rpcs3_ios_core_get_configuration(rpcs3_ios_configuration* 
     }
 
     std::lock_guard lock(g_settings_mutex);
-    *configuration = {
-        sizeof(rpcs3_ios_configuration),
-        current_cpu_mode(),
-        g_cfg.audio.renderer.get() == audio_renderer::cubeb ? 1u : 0u,
-        static_cast<uint32_t>(g_cfg.audio.volume.get()),
-        static_cast<uint32_t>(g_cfg.video.resolution_scale_percent.get()),
-        encode_frame_limit(g_cfg.video.frame_limit.get()),
-        g_cfg.video.disable_on_disk_shader_cache.get() ? 0u : 1u,
-        g_cfg.video.perf_overlay.enabled.get() ? 1u : 0u,
-        static_cast<uint32_t>(g_cfg.core.preferred_spu_threads.get()),
-    };
+    *configuration = configuration_snapshot();
+    rpcs3::ios::set_core_last_error({});
     return RPCS3_IOS_CORE_SUCCESS;
 }
 
@@ -229,10 +245,7 @@ rpcs3_ios_core_result rpcs3_ios_core_set_configuration(const rpcs3_ios_configura
     const rpcs3_ios_core_result result = apply_configuration(*configuration);
     if (result == RPCS3_IOS_CORE_SUCCESS)
     {
-        rpcs3_ios_configuration normalized{};
-        normalized.struct_size = sizeof(normalized);
-        rpcs3_ios_core_get_configuration(&normalized);
-        persist_configuration(normalized);
+        persist_configuration(configuration_snapshot());
     }
     return result;
 }
@@ -265,7 +278,7 @@ rpcs3_ios_core_result rpcs3_ios_core_reset_configuration(void)
         {
             [defaults removeObjectForKey:key];
         }
-        persist_configuration(configuration);
+        persist_configuration(configuration_snapshot());
     }
     return result;
 }
