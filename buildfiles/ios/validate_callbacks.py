@@ -17,6 +17,7 @@ REQUIRED_FILES = (
     "rpcs3/ios/IOSCoreEventCallback.mm",
     "rpcs3/ios/IOSCoreImageCallbacks.h",
     "rpcs3/ios/IOSCoreImageCallbacks.mm",
+    "rpcs3/ios/IOSCoreOpenURL.mm",
     "rpcs3/ios/IOSCoreSaveDialog.h",
     "rpcs3/ios/IOSCoreSaveDialog.mm",
 )
@@ -46,6 +47,7 @@ def main() -> int:
     composite = read("rpcs3/ios/IOSCoreCallbacksComposite.cpp")
     event_wrapper = read("rpcs3/ios/IOSCoreEventCallback.mm")
     image = read("rpcs3/ios/IOSCoreImageCallbacks.mm")
+    open_url = read("rpcs3/ios/IOSCoreOpenURL.mm")
     bounded_save = read("rpcs3/ios/IOSCoreSaveDialog.mm")
     defaults = read("rpcs3/ios/IOSCoreDefaults.cpp")
     emulator = read("rpcs3/ios/IOSCoreEmulator.mm")
@@ -56,11 +58,12 @@ def main() -> int:
         "IOSCoreCallbacksComposite.cpp",
         "IOSCoreEventCallback.mm",
         "IOSCoreImageCallbacks.mm",
+        "IOSCoreOpenURL.mm",
         "IOSCoreSaveDialog.mm",
         "extend_core_callbacks=extend_core_callbacks_base",
         "rpcs3_ios_core_set_event_callback=rpcs3_ios_core_set_event_callback_base",
     ):
-        require(errors, contract in cmake, f"callback composition build contract is missing: {contract}")
+        require(errors, contract in cmake, f"callback or host composition build contract is missing: {contract}")
 
     for contract in (
         "class ios_msg_dialog",
@@ -114,6 +117,18 @@ def main() -> int:
     )
 
     for contract in (
+        "startAccessingSecurityScopedResource",
+        "rpcs3_ios_core_import_path",
+        "rpcs3_ios_core_install_firmware",
+        "rpcs3_ios_core_install_package",
+        "rpcs3_ios_core_boot_path",
+        "application:(UIApplication*)application",
+        "openURL:(NSURL*)url",
+        "const std::string path_copy",
+    ):
+        require(errors, contract in open_url, f"open-in-place routing contract is missing: {contract}")
+
+    for contract in (
         "#ifdef RPCS3_IOS_CORE",
         "extern atomic_t<bool> g_headless",
         "const bool has_render_host = has_core_render_view()",
@@ -127,10 +142,11 @@ def main() -> int:
     require(errors, "g_event_generation" in emulator, "queued event generation guard is missing")
 
     for contract in (
-        "Firmware installation",
-        "PKG installation",
         "Persistent mobile-safe settings",
-        "Game library",
+        "Game library and persistent roots",
+        "CoreMIDI input",
+        "Firmware and package installation",
+        "Installer status polling",
         "Native guest interfaces",
         "Evidence still required",
     ):
@@ -141,7 +157,7 @@ def main() -> int:
             print(f"error: {error}", file=sys.stderr)
         return 1
 
-    print("RPCS3 iOS native callback/management contracts passed (no Apple execution performed).")
+    print("RPCS3 iOS native callback/open-in-place/management contracts passed (no Apple execution performed).")
     return 0
 
 
