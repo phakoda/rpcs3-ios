@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cstring>
 #include <deque>
+#include <exception>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -50,6 +51,18 @@ public:
         g_operation_thread = {};
     }
 };
+
+void set_last_installed_path(std::string path)
+{
+    std::lock_guard lock(g_operation_state_mutex);
+    g_last_installed_path = std::move(path);
+}
+
+std::string get_last_installed_path()
+{
+    std::lock_guard lock(g_operation_state_mutex);
+    return g_last_installed_path;
+}
 
 void report_progress(
     rpcs3_ios_installation_progress_callback callback,
@@ -240,7 +253,8 @@ rpcs3_ios_core_result rpcs3_ios_core_install_firmware(
             return RPCS3_IOS_CORE_PLATFORM_ERROR;
         }
 
-        std::string version = pup.get_file(0x100).to_string();
+        fs::file version_file = pup.get_file(0x100);
+        std::string version = version_file ? version_file.to_string() : std::string{};
         if (const size_t newline = version.find('\n'); newline != std::string::npos)
         {
             version.erase(newline);
@@ -324,10 +338,16 @@ rpcs3_ios_core_result rpcs3_ios_core_install_firmware(
                 RPCS3_IOS_INSTALLATION_EXTRACTING, completed, total, update_filename);
         }
 
+        if (g_cancel_requested.load())
+        {
+            rpcs3::ios::set_core_last_error("Firmware installation was cancelled before finalization.");
+            return RPCS3_IOS_CORE_CANCELLED;
+        }
+
         report_progress(callback, context, RPCS3_IOS_INSTALLATION_FIRMWARE,
             RPCS3_IOS_INSTALLATION_FINALIZING, total, total, "Refreshing RPCS3 virtual filesystem state.");
         Emu.Init();
-        g_last_installed_path = g_cfg_vfs.get_dev_flash();
+        set_last_installed_path(g_cfg_vfs.get_dev_flash());
         rpcs3::ios::set_core_last_error({});
         report_progress(callback, context, RPCS3_IOS_INSTALLATION_FIRMWARE,
             RPCS3_IOS_INSTALLATION_COMPLETE, total, total, "Installed firmware " + version + ".");
@@ -386,14 +406,22 @@ rpcs3_ios_core_result rpcs3_ios_core_install_package(
         std::deque<std::string> bootable_paths;
         package_install_result install_result{};
         std::atomic_bool extraction_finished = false;
+        std::exception_ptr extraction_error;
 
-        std::thread extraction([&]
+        std::jthread extraction([&]
         {
-            install_result = package_reader::extract_data(readers, bootable_paths);
-            extraction_finished = true;
+            try
+            {
+                install_result = package_reader::extract_data(readers, bootable_paths);
+            }
+            catch (...)
+            {
+                extraction_error = std::current_exception();
+            }
+            extraction_finished.store(true, std::memory_order_release);
         });
 
-        while (!extraction_finished.load())
+        while (!extraction_finished.load(std::memory_order_acquire))
         {
             if (g_cancel_requested.load())
             {
@@ -407,6 +435,11 @@ rpcs3_ios_core_result rpcs3_ios_core_install_package(
         }
         extraction.join();
         g_active_package_reader = nullptr;
+
+        if (extraction_error)
+        {
+            std::rethrow_exception(extraction_error);
+        }
 
         if (g_cancel_requested.load() ||
             readers.front().get_result() == package_reader::result::aborted ||
@@ -433,20 +466,21 @@ rpcs3_ios_core_result rpcs3_ios_core_install_package(
             return RPCS3_IOS_CORE_PLATFORM_ERROR;
         }
 
-        g_last_installed_path.clear();
+        std::string installed_path;
         if (!bootable_paths.empty())
         {
-            g_last_installed_path = bootable_paths.front();
-            if (!g_last_installed_path.empty())
+            installed_path = bootable_paths.front();
+            if (!installed_path.empty())
             {
-                Emu.AddGame(g_last_installed_path);
+                Emu.AddGame(installed_path);
             }
         }
+        set_last_installed_path(installed_path);
 
         rpcs3::ios::set_core_last_error({});
         report_progress(callback, context, RPCS3_IOS_INSTALLATION_PACKAGE,
             RPCS3_IOS_INSTALLATION_COMPLETE, 100, 100,
-            g_last_installed_path.empty() ? "Package installation completed." : g_last_installed_path);
+            installed_path.empty() ? "Package installation completed." : installed_path);
         return RPCS3_IOS_CORE_SUCCESS;
     }
     catch (const std::exception& exception)
@@ -471,8 +505,7 @@ size_t rpcs3_ios_core_copy_firmware_version(char* buffer, size_t buffer_size)
 
 size_t rpcs3_ios_core_copy_last_installed_path(char* buffer, size_t buffer_size)
 {
-    std::lock_guard lock(g_operation_state_mutex);
-    g_installed_path_copy = g_last_installed_path;
+    g_installed_path_copy = get_last_installed_path();
     return copy_string(g_installed_path_copy, buffer, buffer_size);
 }
 }
