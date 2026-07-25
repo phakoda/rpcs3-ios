@@ -15,6 +15,8 @@ REQUIRED_FILES = (
     "rpcs3/ios/IOSCoreCallbacks.mm",
     "rpcs3/ios/IOSCoreCallbacksComposite.cpp",
     "rpcs3/ios/IOSCoreEventCallback.mm",
+    "rpcs3/ios/IOSCoreFallbackCallbacks.h",
+    "rpcs3/ios/IOSCoreFallbackCallbacks.mm",
     "rpcs3/ios/IOSCoreImageCallbacks.h",
     "rpcs3/ios/IOSCoreImageCallbacks.mm",
     "rpcs3/ios/IOSCoreOpenURL.mm",
@@ -46,6 +48,7 @@ def main() -> int:
     callback = read("rpcs3/ios/IOSCoreCallbacks.mm")
     composite = read("rpcs3/ios/IOSCoreCallbacksComposite.cpp")
     event_wrapper = read("rpcs3/ios/IOSCoreEventCallback.mm")
+    fallback = read("rpcs3/ios/IOSCoreFallbackCallbacks.mm")
     image = read("rpcs3/ios/IOSCoreImageCallbacks.mm")
     open_url = read("rpcs3/ios/IOSCoreOpenURL.mm")
     bounded_save = read("rpcs3/ios/IOSCoreSaveDialog.mm")
@@ -57,6 +60,7 @@ def main() -> int:
         "IOSCoreCallbacks.mm",
         "IOSCoreCallbacksComposite.cpp",
         "IOSCoreEventCallback.mm",
+        "IOSCoreFallbackCallbacks.mm",
         "IOSCoreImageCallbacks.mm",
         "IOSCoreOpenURL.mm",
         "IOSCoreSaveDialog.mm",
@@ -76,6 +80,7 @@ def main() -> int:
 
     for contract in (
         "extend_core_callbacks_base",
+        "extend_core_fallback_callbacks",
         "extend_core_image_callbacks",
         "extend_core_save_dialog_callback",
     ):
@@ -88,6 +93,26 @@ def main() -> int:
         "waits for any in-flight callback",
     ):
         require(errors, contract in event_wrapper, f"main-queue event mutation contract is missing: {contract}")
+
+    for contract in (
+        "callbacks.get_localized_string",
+        "callbacks.get_localized_u32string",
+        "CFStringIsSurrogateHighCharacter",
+        "CFStringGetLongCharacterForSurrogatePair",
+        "callbacks.play_sound",
+        "AVAudioPlayerDelegate",
+        "NSMutableSet<AVAudioPlayer*>",
+        "volume.value_or(1.0f)",
+        "audioPlayerDidFinishPlaying",
+        "audioPlayerDecodeErrorDidOccur",
+    ):
+        require(errors, contract in fallback, f"localization or native sound fallback is missing: {contract}")
+
+    require(
+        errors,
+        fallback.find("@interface RPCS3CoreSoundPool") < fallback.find("namespace rpcs3::ios"),
+        "Objective-C sound pool is incorrectly declared inside a C++ namespace",
+    )
 
     for contract in (
         "preferredFilenameExtension",
@@ -157,7 +182,7 @@ def main() -> int:
             print(f"error: {error}", file=sys.stderr)
         return 1
 
-    print("RPCS3 iOS native callback/open-in-place/management contracts passed (no Apple execution performed).")
+    print("RPCS3 iOS native callback/fallback/open-in-place contracts passed (no Apple execution performed).")
     return 0
 
 
