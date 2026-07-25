@@ -1,6 +1,6 @@
 # Additional Qt-free RPCS3Core.framework modules kept separate from generated
 # upstream source adaptations. This file is included after PatchCoreSources.cmake
-# has created the framework target.
+# has created the framework and management-host targets.
 
 if(NOT RPCS3_IOS)
     return()
@@ -45,4 +45,9 @@ if(TARGET rpcs3_ios_core_framework)
     set_target_properties(rpcs3_ios_core_framework PROPERTIES
         VERSION 0.4.0
         SOVERSION 0.4)
+endif()
+
+if(TARGET rpcs3_ios_core_link)
+    target_sources(rpcs3_ios_core_link PRIVATE
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreOpenURL.mm")
 endif()
