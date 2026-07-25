@@ -4,11 +4,11 @@
 #include <mach/mach_time.h>
 
 #include <algorithm>
-#include <array>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <mutex>
+#include <new>
 #include <string>
 #include <utility>
 #include <vector>
@@ -25,7 +25,9 @@ struct midi_input_state
 {
     std::mutex mutex;
     std::deque<queued_message> messages;
+    std::vector<unsigned char> pending;
     std::vector<unsigned char> sysex;
+    size_t pending_size = 0;
     MIDIClientRef client = 0;
     MIDIPortRef port = 0;
     MIDIEndpointRef endpoint = 0;
@@ -59,6 +61,14 @@ void set_status(RtMidiPtr device, bool ok, std::string status)
         device->msg = "CoreMIDI input state is unavailable";
     }
     device->ok = ok;
+}
+
+void set_ok(RtMidiPtr device)
+{
+    if (device)
+    {
+        device->ok = true;
+    }
 }
 
 double seconds_between(uint64_t newer, uint64_t older)
@@ -137,99 +147,118 @@ void enqueue(midi_input_state& state, std::vector<unsigned char> bytes, uint64_t
     state.messages.push_back({std::move(bytes), timestamp});
 }
 
+void finish_pending(midi_input_state& state, uint64_t timestamp)
+{
+    if (state.pending_size && state.pending.size() == state.pending_size)
+    {
+        enqueue(state, std::move(state.pending), timestamp);
+    }
+    state.pending.clear();
+    state.pending_size = 0;
+}
+
+void begin_status(midi_input_state& state, unsigned char status, uint64_t timestamp)
+{
+    state.pending.clear();
+    state.pending_size = 0;
+
+    if (status == 0xf0)
+    {
+        state.running_status = 0;
+        state.sysex = {status};
+        return;
+    }
+
+    const size_t size = status < 0xf0
+        ? channel_message_size(status)
+        : system_message_size(status);
+    if (status < 0xf0)
+    {
+        state.running_status = status;
+    }
+    else
+    {
+        state.running_status = 0;
+    }
+
+    if (!size)
+    {
+        return;
+    }
+
+    state.pending = {status};
+    state.pending_size = size;
+    if (size == 1)
+    {
+        finish_pending(state, timestamp);
+    }
+}
+
 void parse_packet(midi_input_state& state, const unsigned char* data, size_t length, uint64_t timestamp)
 {
-    size_t offset = 0;
-    while (offset < length)
+    for (size_t offset = 0; offset < length; ++offset)
     {
         const unsigned char byte = data[offset];
 
-        // System real-time messages can occur between any two bytes and do not
-        // disturb channel running status or an in-progress SysEx message.
+        // System real-time bytes are valid between any two MIDI bytes. They do
+        // not disturb channel running status, a short message, or SysEx state.
         if (byte >= 0xf8)
         {
             enqueue(state, {byte}, timestamp);
-            ++offset;
             continue;
         }
 
         if (!state.sysex.empty())
         {
-            state.sysex.push_back(byte);
-            ++offset;
             if (byte == 0xf7)
             {
+                state.sysex.push_back(byte);
                 enqueue(state, std::move(state.sysex), timestamp);
                 state.sysex.clear();
+                continue;
             }
-            else if (state.sysex.size() > 65536)
+            if (byte & 0x80)
             {
+                // Abort malformed SysEx and treat the new status normally.
                 state.sysex.clear();
             }
-            continue;
-        }
-
-        if (byte == 0xf0)
-        {
-            state.running_status = 0;
-            state.sysex = {byte};
-            ++offset;
-            continue;
+            else
+            {
+                state.sysex.push_back(byte);
+                if (state.sysex.size() > 65536)
+                {
+                    state.sysex.clear();
+                }
+                continue;
+            }
         }
 
         if (byte & 0x80)
         {
-            const size_t message_size = byte < 0xf0
-                ? channel_message_size(byte)
-                : system_message_size(byte);
-            if (byte < 0xf0)
-            {
-                state.running_status = byte;
-            }
-            else
-            {
-                state.running_status = 0;
-            }
+            begin_status(state, byte, timestamp);
+            continue;
+        }
 
-            if (!message_size)
+        if (state.pending.empty())
+        {
+            if (!state.running_status)
             {
-                ++offset;
                 continue;
             }
-            if (offset + message_size > length)
-            {
-                // CoreMIDI normally preserves complete short messages inside a
-                // packet. Ignore a malformed trailing fragment rather than
-                // manufacturing bytes across unrelated packets.
-                return;
-            }
-
-            enqueue(state,
-                std::vector<unsigned char>(data + offset, data + offset + message_size),
-                timestamp);
-            offset += message_size;
-            continue;
+            state.pending = {state.running_status};
+            state.pending_size = channel_message_size(state.running_status);
         }
 
-        if (!state.running_status)
+        state.pending.push_back(byte);
+        if (state.pending.size() == state.pending_size)
         {
-            ++offset;
-            continue;
+            finish_pending(state, timestamp);
         }
-
-        const size_t full_size = channel_message_size(state.running_status);
-        const size_t data_size = full_size - 1;
-        if (offset + data_size > length)
+        else if (state.pending.size() > state.pending_size)
         {
-            return;
+            state.pending.clear();
+            state.pending_size = 0;
         }
-
-        std::vector<unsigned char> message;
-        message.reserve(full_size);
-        message.push_back(state.running_status);
-        message.insert(message.end(), data + offset, data + offset + data_size);
-        enqueue(state, std::move(message), timestamp);
-        offset += data_size;
     }
 }
 
@@ -265,9 +294,11 @@ std::string endpoint_name(MIDIEndpointRef endpoint)
         }
     }
 
-    std::array<char, 512> buffer{};
+    const CFIndex capacity = CFStringGetMaximumSizeForEncoding(
+        CFStringGetLength(name), kCFStringEncodingUTF8) + 1;
+    std::vector<char> buffer(static_cast<size_t>(std::max<CFIndex>(capacity, 1)));
     const bool converted = CFStringGetCString(
-        name, buffer.data(), static_cast<CFIndex>(buffer.size()), kCFStringEncodingUTF8);
+        name, buffer.data(), capacity, kCFStringEncodingUTF8);
     CFRelease(name);
     return converted ? std::string(buffer.data()) : std::string{};
 }
@@ -279,9 +310,14 @@ void close_port(midi_input_state& state)
         MIDIPortDisconnectSource(state.port, state.endpoint);
     }
     state.endpoint = 0;
+
+    // Disconnect first, then wait for any callback already holding the queue
+    // mutex before clearing state or disposing the CoreMIDI objects.
     std::lock_guard lock(state.mutex);
     state.messages.clear();
+    state.pending.clear();
     state.sysex.clear();
+    state.pending_size = 0;
     state.running_status = 0;
     state.last_delivery_time = 0;
 }
@@ -401,7 +437,7 @@ double rtmidi_in_get_message(RtMidiInPtr device, unsigned char* message, size_t*
     if (state->messages.empty())
     {
         *size = 0;
-        set_status(device, true, "No CoreMIDI message is queued");
+        set_ok(device);
         return 0.0;
     }
 
@@ -419,7 +455,7 @@ double rtmidi_in_get_message(RtMidiInPtr device, unsigned char* message, size_t*
     const double delta = seconds_between(queued.host_time, state->last_delivery_time);
     state->last_delivery_time = queued.host_time;
     state->messages.pop_front();
-    set_status(device, true, "CoreMIDI message delivered");
+    set_ok(device);
     return delta;
 }
 
@@ -450,7 +486,12 @@ int rtmidi_get_port_name(RtMidiPtr device, unsigned int port_number, char* buffe
         return -1;
     }
 
-    const std::string name = endpoint_name(MIDIGetSource(port_number));
+    std::string name = endpoint_name(MIDIGetSource(port_number));
+    if (name.empty())
+    {
+        name = "CoreMIDI Source " + std::to_string(port_number + 1);
+    }
+
     const int required = static_cast<int>(name.size() + 1);
     const int capacity = *buffer_length;
     *buffer_length = required;
@@ -484,6 +525,12 @@ void rtmidi_open_port(RtMidiPtr device, unsigned int port_number, const char* po
 
     close_port(*state);
     const MIDIEndpointRef endpoint = MIDIGetSource(port_number);
+    if (!endpoint)
+    {
+        set_status(device, false, "The selected CoreMIDI source is unavailable");
+        return;
+    }
+
     const OSStatus status = MIDIPortConnectSource(state->port, endpoint, nullptr);
     if (status != noErr)
     {
