@@ -6,6 +6,7 @@
 #include "Emu/System.h"
 
 #include <algorithm>
+#include <optional>
 #include <string>
 
 namespace
@@ -38,6 +39,7 @@ std::u32string utf32_string(NSString* value)
         result.push_back(static_cast<char32_t>(first));
     }
     return result;
+}
 }
 
 @interface RPCS3CoreSoundPool : NSObject <AVAudioPlayerDelegate>
@@ -99,7 +101,6 @@ std::u32string utf32_string(NSString* value)
 }
 
 @end
-}
 
 namespace rpcs3::ios
 {
