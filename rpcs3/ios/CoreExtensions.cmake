@@ -27,6 +27,8 @@ if(TARGET rpcs3_ios_core_framework)
         "${_rpcs3_ios_core_callbacks}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacksComposite.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreEventCallback.mm"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreFallbackCallbacks.h"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreFallbackCallbacks.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreImageCallbacks.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreImageCallbacks.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreSaveDialog.h"
