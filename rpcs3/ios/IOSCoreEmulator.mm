@@ -1,4 +1,5 @@
 #include "IOSCoreEmulator.h"
+#include "IOSCoreCallbacks.h"
 #include "IOSCoreDefaults.h"
 #include "IOSCoreGSFrame.h"
 #include "RPCS3Core.h"
@@ -350,6 +351,7 @@ EmuCallbacks make_core_callbacks()
     callbacks.enable_gamemode = [](bool) {};
     callbacks.get_database_config = [](const std::string&) { return std::string{}; };
 
+    rpcs3::ios::extend_core_callbacks(callbacks);
     return callbacks;
 }
 }
