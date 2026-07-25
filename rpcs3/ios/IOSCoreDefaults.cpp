@@ -4,6 +4,7 @@
 
 #ifdef RPCS3_IOS_CORE
 #include "IOSCoreGSFrame.h"
+#include "IOSCoreMIDI.h"
 #include "Emu/System.h"
 #include "util/atomic.hpp"
 
@@ -61,5 +62,11 @@ void apply_core_compatibility_defaults()
     {
         g_cfg.io.mouse = mouse_handler::basic;
     }
+
+#ifdef RPCS3_IOS_CORE
+    // Per-game configuration loads can replace the global MIDI string. Reapply
+    // the host application's persisted adapter mappings before every boot.
+    apply_core_midi_configuration();
+#endif
 }
 }
