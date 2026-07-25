@@ -5,6 +5,7 @@
 #ifdef RPCS3_IOS_CORE
 #include "IOSCoreGSFrame.h"
 #include "Emu/System.h"
+#include "util/atomic.hpp"
 
 extern atomic_t<bool> g_headless;
 #endif
@@ -49,12 +50,11 @@ void apply_core_compatibility_defaults()
     }
 #endif
 
-    // The current iOS core exposes emulated USB devices but not public host USB,
-    // camera, microphone, PS Move, or MIDI capture backends.
+    // The current iOS core exposes emulated USB and public CoreMIDI sources but
+    // not host USB passthrough, camera, microphone, or PS Move capture backends.
     g_cfg.audio.microphone_type = microphone_handler::null;
     g_cfg.io.camera = camera_handler::null;
     g_cfg.io.move = move_handler::null;
-    g_cfg.io.midi_devices = "";
 
     // Raw desktop mouse capture is not available through UIKit.
     if (g_cfg.io.mouse == mouse_handler::raw)
