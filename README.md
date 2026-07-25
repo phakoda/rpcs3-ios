@@ -37,13 +37,13 @@ If you are unsure about your work, open a discussion issue to talk it through wi
 
 See [BUILDING.md](BUILDING.md) for desktop build instructions.
 
-The experimental iOS/iPadOS workflow is documented in [BUILDING_IOS.md](BUILDING_IOS.md). The implementation architecture, reference-emulator rationale, status matrix, and remaining evidence gates are tracked in [PORTING_IOS.md](PORTING_IOS.md).
+The experimental iOS/iPadOS workflow is documented in [BUILDING_IOS.md](BUILDING_IOS.md). The implementation architecture, reference-emulator rationale, status matrix, and remaining evidence gates are tracked in [PORTING_IOS.md](PORTING_IOS.md). Native framework hosts should also read the public [RPCS3Core.framework API guide](IOS_CORE_API.md).
 
 ## Running
 
 Check our friendly [quickstart](https://rpcs3.net/quickstart) guide to make sure your computer meets the minimum system requirements to run RPCS3.
 
-Don't forget to have your graphics driver up to date and to install the [Visual C++ Redistributable Packages for Visual Studio 2022](https://aka.ms/vs/17/release/vc_redist.x64.exe) if you are a Windows user.
+Don't forget to have your graphics driver up to date and to install the [Visual C++ Redistributable Packages for Visual 2022](https://aka.ms/vs/cpp)
 
 ## License
 
