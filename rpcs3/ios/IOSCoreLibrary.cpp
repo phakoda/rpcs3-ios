@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <exception>
 #include <mutex>
 #include <string>
 #include <utility>
