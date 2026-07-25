@@ -2,12 +2,29 @@
 
 #include "Emu/system_config.h"
 
+#ifdef RPCS3_IOS_CORE
+#include "IOSCoreGSFrame.h"
+#include "Emu/System.h"
+#endif
+
 namespace rpcs3::ios
 {
 void apply_core_compatibility_defaults()
 {
-    // MoltenVK is the only renderer linked into iOS targets.
+#ifdef RPCS3_IOS_CORE
+    // Upstream treats headless mode as Null-RSX-only. A framework host with a
+    // live CAMetalLayer is a real GUI/render target even though it does not use
+    // Qt, so clear headless mode before RPCS3's settings fixup runs.
+    const bool has_render_host = has_core_render_view();
+    if (Emulator::IsAvailable())
+    {
+        Emu.SetHeadless(!has_render_host);
+    }
+    g_cfg.video.renderer = has_render_host ? video_renderer::vulkan : video_renderer::null;
+#else
+    // MoltenVK is the only renderer linked into the full iOS frontend.
     g_cfg.video.renderer = video_renderer::vulkan;
+#endif
 
 #ifndef RPCS3_IOS_HAS_LLVM
     if (g_cfg.core.ppu_decoder == ppu_decoder_type::llvm)
