@@ -11,7 +11,9 @@
 #include <atomic>
 #include <cstring>
 #include <mutex>
+#include <sstream>
 #include <string>
+#include <vector>
 
 namespace rpcs3::ios
 {
@@ -47,6 +49,117 @@ size_t copy_string(const std::string& value, char* buffer, size_t buffer_size)
     std::memcpy(buffer, value.data(), copied);
     buffer[copied] = '\0';
     return required;
+}
+
+std::string read_public_string(size_t (*copy_function)(char*, size_t))
+{
+    const size_t required = copy_function(nullptr, 0);
+    if (!required)
+    {
+        return {};
+    }
+
+    std::vector<char> buffer(required);
+    copy_function(buffer.data(), buffer.size());
+    return buffer.data();
+}
+
+std::string copy_registered_directory(size_t index)
+{
+    size_t required = 0;
+    if (rpcs3_ios_core_copy_game_directory(index, nullptr, 0, &required) !=
+        RPCS3_IOS_CORE_BUFFER_TOO_SMALL)
+    {
+        return {};
+    }
+
+    std::vector<char> buffer(std::max<size_t>(required, 1));
+    return rpcs3_ios_core_copy_game_directory(
+        index, buffer.data(), buffer.size(), &required) == RPCS3_IOS_CORE_SUCCESS
+        ? std::string(buffer.data())
+        : std::string{};
+}
+
+std::string copy_midi_assignment_name(uint32_t slot, uint32_t* type)
+{
+    size_t required = 0;
+    uint32_t assignment_type = RPCS3_IOS_MIDI_KEYBOARD;
+    if (rpcs3_ios_core_copy_midi_assignment(
+            slot, &assignment_type, nullptr, 0, &required) != RPCS3_IOS_CORE_BUFFER_TOO_SMALL)
+    {
+        if (type)
+        {
+            *type = assignment_type;
+        }
+        return {};
+    }
+
+    std::vector<char> buffer(std::max<size_t>(required, 1));
+    const rpcs3_ios_core_result result = rpcs3_ios_core_copy_midi_assignment(
+        slot, &assignment_type, buffer.data(), buffer.size(), &required);
+    if (type)
+    {
+        *type = assignment_type;
+    }
+    return result == RPCS3_IOS_CORE_SUCCESS ? std::string(buffer.data()) : std::string{};
+}
+
+const char* midi_type_name(uint32_t type)
+{
+    switch (type)
+    {
+    case RPCS3_IOS_MIDI_KEYBOARD: return "Keyboard";
+    case RPCS3_IOS_MIDI_GUITAR_17_FRET: return "Guitar (17 frets)";
+    case RPCS3_IOS_MIDI_GUITAR_22_FRET: return "Guitar (22 frets)";
+    case RPCS3_IOS_MIDI_DRUMS: return "Drums";
+    default: return "Unknown";
+    }
+}
+
+std::string build_core_diagnostics_extension()
+{
+    const std::string previous_error = rpcs3::ios::get_core_last_error();
+    std::ostringstream report;
+    report << "\nRPCS3Core.framework\n";
+    report << "Version: " << RPCS3CoreVersionString << "\n";
+    report << "Initialized: " << (g_initialized.load() ? "yes" : "no") << "\n";
+    report << "Render view: " << (rpcs3::ios::has_core_render_view() ? "attached" : "headless") << "\n";
+    report << "Game mappings: " << rpcs3_ios_core_game_count() << "\n";
+
+    const size_t directory_count = rpcs3_ios_core_game_directory_count();
+    report << "Persistent game roots: " << directory_count << "\n";
+    for (size_t index = 0; index < directory_count; ++index)
+    {
+        const std::string path = copy_registered_directory(index);
+        report << "  Root " << (index + 1) << ": "
+               << (path.empty() ? "<unavailable>" : path) << "\n";
+    }
+
+    report << "CoreMIDI sources: " << rpcs3_ios_core_midi_source_count() << "\n";
+    if (g_initialized.load())
+    {
+        const size_t slot_count = rpcs3_ios_core_midi_slot_count();
+        for (uint32_t slot = 0; slot < slot_count; ++slot)
+        {
+            uint32_t type = RPCS3_IOS_MIDI_KEYBOARD;
+            const std::string source = copy_midi_assignment_name(slot, &type);
+            report << "  MIDI slot " << (slot + 1) << ": " << midi_type_name(type)
+                   << " / " << (source.empty() ? "None" : source) << "\n";
+        }
+    }
+
+    const rpcs3_ios_installation_status installation = rpcs3_ios_core_query_installation_status();
+    report << "Installer active: " << (installation.active ? "yes" : "no") << "\n";
+    report << "Installer cancel requested: " << (installation.cancel_requested ? "yes" : "no") << "\n";
+    report << "Installer kind: "
+           << (installation.kind == RPCS3_IOS_INSTALLATION_PACKAGE ? "package" : "firmware") << "\n";
+    report << "Installer stage: " << installation.stage << "\n";
+    report << "Installer progress: " << installation.completed << "/" << installation.total << "\n";
+    const std::string detail = read_public_string(rpcs3_ios_core_copy_installation_detail);
+    report << "Installer detail: " << (detail.empty() ? "<none>" : detail) << "\n";
+
+    rpcs3::ios::set_core_last_error(previous_error);
+    return report.str();
 }
 
 const char* refresh_path(std::string& storage, const std::string& value)
@@ -324,6 +437,7 @@ size_t rpcs3_ios_core_copy_jit_detail(char* buffer, size_t buffer_size)
 size_t rpcs3_ios_core_copy_diagnostics(char* buffer, size_t buffer_size)
 {
     g_diagnostics = rpcs3::ios::build_diagnostics_report();
+    g_diagnostics += build_core_diagnostics_extension();
     return copy_string(g_diagnostics, buffer, buffer_size);
 }
 
