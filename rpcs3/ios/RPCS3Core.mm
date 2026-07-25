@@ -137,13 +137,15 @@ rpcs3_ios_core_result rpcs3_ios_core_initialize(void)
 rpcs3_ios_core_result rpcs3_ios_core_shutdown(void)
 {
     std::lock_guard lock(g_core_mutex);
-    if (!g_initialized.load())
+    if (!g_initialized.exchange(false))
     {
         return RPCS3_IOS_CORE_NOT_INITIALIZED;
     }
 
-    // Cancel and drain framework-owned file operations before stopping guest,
-    // renderer, controller, display, audio, and notification services.
+    // Close admission before cancelling and draining framework-owned file
+    // operations. No new importer, installer, library, or boot operation can
+    // begin while guest, renderer, controller, display, audio, and notification
+    // services are being torn down.
     rpcs3::ios::shutdown_core_installer();
     rpcs3::ios::remove_core_lifecycle_callbacks();
     rpcs3::ios::shutdown_core_emulator();
@@ -153,7 +155,6 @@ rpcs3_ios_core_result rpcs3_ios_core_shutdown(void)
     rpcs3::ios::set_performance_callback({});
     rpcs3::ios::shutdown();
     clear_pending_import();
-    g_initialized.store(false);
     return RPCS3_IOS_CORE_SUCCESS;
 }
 
