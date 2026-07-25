@@ -139,6 +139,17 @@ typedef void (*rpcs3_ios_installation_progress_callback)(
     const char* detail,
     void* context);
 
+typedef struct rpcs3_ios_installation_status
+{
+    uint32_t struct_size;
+    uint32_t active;
+    uint32_t cancel_requested;
+    uint32_t kind;
+    uint32_t stage;
+    uint32_t completed;
+    uint32_t total;
+} rpcs3_ios_installation_status;
+
 typedef struct rpcs3_ios_jit_status
 {
     uint8_t map_jit_available;
@@ -286,6 +297,7 @@ RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_install_package(
     rpcs3_ios_installation_progress_callback callback,
     void* context);
 RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_request_installation_cancel(void);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_installation_status rpcs3_ios_core_query_installation_status(void);
 
 RPCS3_IOS_CORE_EXPORT const char* rpcs3_ios_core_application_support_path(void);
 RPCS3_IOS_CORE_EXPORT const char* rpcs3_ios_core_caches_path(void);
@@ -300,6 +312,7 @@ RPCS3_IOS_CORE_EXPORT rpcs3_ios_performance_status rpcs3_ios_core_query_performa
 // non-null, at most buffer_size bytes are written and the result is always NUL
 // terminated when buffer_size is non-zero.
 RPCS3_IOS_CORE_EXPORT size_t rpcs3_ios_core_copy_jit_detail(char* buffer, size_t buffer_size);
+RPCS3_IOS_CORE_EXPORT size_t rpcs3_ios_core_copy_installation_detail(char* buffer, size_t buffer_size);
 RPCS3_IOS_CORE_EXPORT size_t rpcs3_ios_core_copy_diagnostics(char* buffer, size_t buffer_size);
 RPCS3_IOS_CORE_EXPORT size_t rpcs3_ios_core_copy_last_error(char* buffer, size_t buffer_size);
 RPCS3_IOS_CORE_EXPORT size_t rpcs3_ios_core_copy_boot_path(char* buffer, size_t buffer_size);
