@@ -9,6 +9,7 @@
 #include "Emu/Io/midi_config_types.h"
 #include "Emu/system_config.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <mutex>
@@ -94,11 +95,18 @@ midi_assignments load_assignments()
     for (NSUInteger index = 0; index < count; ++index)
     {
         NSDictionary* entry = stored[index];
+        if (![entry isKindOfClass:NSDictionary.class])
+        {
+            continue;
+        }
+
         NSNumber* type = entry[midi_type_key];
         NSString* name = entry[midi_name_key];
-        const uint32_t type_value = type ? type.unsignedIntValue : RPCS3_IOS_MIDI_KEYBOARD;
+        const uint32_t type_value = [type isKindOfClass:NSNumber.class]
+            ? type.unsignedIntValue
+            : RPCS3_IOS_MIDI_KEYBOARD;
         result[index].type = type_name(type_value) ? type_value : RPCS3_IOS_MIDI_KEYBOARD;
-        result[index].name = name ? utf8_string(name) : std::string{};
+        result[index].name = [name isKindOfClass:NSString.class] ? utf8_string(name) : std::string{};
         if (!valid_source_name(result[index].name))
         {
             result[index].name.clear();
@@ -196,11 +204,10 @@ rpcs3_ios_core_result rpcs3_ios_core_copy_midi_source(
         return RPCS3_IOS_CORE_INVALID_ARGUMENT;
     }
 
-    const std::string value = endpoint_name(MIDIGetSource(index));
+    std::string value = endpoint_name(MIDIGetSource(index));
     if (value.empty())
     {
-        rpcs3::ios::set_core_last_error("The selected CoreMIDI source has no readable display name.");
-        return RPCS3_IOS_CORE_PLATFORM_ERROR;
+        value = "CoreMIDI Source " + std::to_string(index + 1);
     }
     if (!copy_value(value, name, name_size, required_size))
     {
@@ -285,6 +292,10 @@ rpcs3_ios_core_result rpcs3_ios_core_copy_midi_assignment(
     size_t source_name_size,
     size_t* required_size)
 {
+    if (!rpcs3_ios_core_is_initialized())
+    {
+        return RPCS3_IOS_CORE_NOT_INITIALIZED;
+    }
     if (!valid_slot(slot) || !type || !required_size)
     {
         rpcs3::ios::set_core_last_error("A valid MIDI slot, type output, and required-size output are required.");
