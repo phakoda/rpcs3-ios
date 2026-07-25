@@ -96,6 +96,14 @@ typedef enum rpcs3_ios_frame_limit
     RPCS3_IOS_FRAME_LIMIT_DISPLAY = 4,
 } rpcs3_ios_frame_limit;
 
+typedef enum rpcs3_ios_midi_device_type
+{
+    RPCS3_IOS_MIDI_KEYBOARD = 0,
+    RPCS3_IOS_MIDI_GUITAR_17_FRET = 1,
+    RPCS3_IOS_MIDI_GUITAR_22_FRET = 2,
+    RPCS3_IOS_MIDI_DRUMS = 3,
+} rpcs3_ios_midi_device_type;
+
 typedef struct rpcs3_ios_configuration
 {
     uint32_t struct_size;
@@ -204,11 +212,23 @@ RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_set_configuration(
     const rpcs3_ios_configuration* configuration);
 RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_reset_configuration(void);
 
-// Qt-free game-library management. The library stores title-ID/path mappings in
-// RPCS3's games.yml. Scans and mutations require stopped emulation.
+// Qt-free game-library management. Title-ID/path mappings use RPCS3's normal
+// games.yml. Scan roots are persisted separately in the host's NSUserDefaults
+// domain. Scans and mutations require fully stopped emulation.
 RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_add_game_directory(
     const char* path,
     uint32_t* added_games);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_remove_game_directory(
+    const char* path,
+    uint8_t remove_library_entries,
+    uint32_t* removed_games);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_rescan_game_directories(
+    uint32_t* added_games);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_prune_missing_game_directories(
+    uint32_t* removed_directories);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_clear_game_directories(
+    uint8_t remove_library_entries,
+    uint32_t* removed_games);
 RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_add_game(const char* path);
 RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_remove_game(const char* title_id);
 RPCS3_IOS_CORE_EXPORT size_t rpcs3_ios_core_game_count(void);
@@ -226,6 +246,30 @@ RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_copy_game_directory(
     char* path,
     size_t path_size,
     size_t* path_required);
+
+// Public CoreMIDI source enumeration and persistent mapping to RPCS3's three
+// emulated Rock Band 3 MIDI adapter slots. Names must match a current CoreMIDI
+// source display name. Mutations require fully stopped emulation.
+RPCS3_IOS_CORE_EXPORT size_t rpcs3_ios_core_midi_source_count(void);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_copy_midi_source(
+    size_t index,
+    char* name,
+    size_t name_size,
+    size_t* required_size);
+RPCS3_IOS_CORE_EXPORT size_t rpcs3_ios_core_midi_slot_count(void);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_set_midi_assignment(
+    uint32_t slot,
+    uint32_t type,
+    const char* source_name);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_clear_midi_assignment(
+    uint32_t slot);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_copy_midi_assignment(
+    uint32_t slot,
+    uint32_t* type,
+    char* source_name,
+    size_t source_name_size,
+    size_t* required_size);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_clear_all_midi_assignments(void);
 
 // Installers are synchronous and may perform substantial decryption and file
 // I/O. Invoke them on a serial background queue while emulation is stopped.
