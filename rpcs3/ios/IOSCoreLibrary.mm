@@ -111,6 +111,15 @@ bool unregister_directory(const std::string& path)
     return true;
 }
 
+bool save_games_config()
+{
+    // Emulator intentionally exposes the game map as const. This bridge has
+    // just performed a stopped-state batch mutation through Emulator methods,
+    // so saving the owned non-const object is safe and keeps one disk write.
+    games_config& config = const_cast<games_config&>(Emu.GetGamesConfig());
+    return !config.is_dirty() || config.save();
+}
+
 std::vector<std::pair<std::string, std::string>> game_snapshot()
 {
     std::vector<std::pair<std::string, std::string>> result;
@@ -364,8 +373,7 @@ rpcs3_ios_core_result rpcs3_ios_core_clear_game_directories(
             {
                 total += Emu.RemoveGamesFromDir(directory, {}, false);
             }
-            // Persist the batched games.yml mutations once.
-            if (Emu.GetGamesConfig().is_dirty() && !Emu.GetGamesConfig().save())
+            if (!save_games_config())
             {
                 rpcs3::ios::set_core_last_error("Registered directories were cleared, but games.yml could not be saved.");
                 return RPCS3_IOS_CORE_PLATFORM_ERROR;
@@ -488,6 +496,10 @@ rpcs3_ios_core_result rpcs3_ios_core_copy_game(
     size_t path_size,
     size_t* path_required)
 {
+    if (!rpcs3_ios_core_is_initialized())
+    {
+        return RPCS3_IOS_CORE_NOT_INITIALIZED;
+    }
     if (!title_id_required || !path_required)
     {
         rpcs3::ios::set_core_last_error("Both required-size outputs are required.");
