@@ -34,4 +34,10 @@ if(TARGET rpcs3_ios_core_framework)
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreLibrary.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstaller.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstaller.cpp")
+
+    # PatchCoreSources creates the framework target. Keep the public ABI version
+    # override next to the extension modules that define the 0.4 surface.
+    set_target_properties(rpcs3_ios_core_framework PROPERTIES
+        VERSION 0.4.0
+        SOVERSION 0.4)
 endif()
