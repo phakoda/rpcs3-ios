@@ -14,6 +14,7 @@ REQUIRED_FILES = (
     "rpcs3/ios/IOSCoreCallbacks.h",
     "rpcs3/ios/IOSCoreCallbacks.mm",
     "rpcs3/ios/IOSCoreCallbacksComposite.cpp",
+    "rpcs3/ios/IOSCoreEventCallback.mm",
     "rpcs3/ios/IOSCoreImageCallbacks.h",
     "rpcs3/ios/IOSCoreImageCallbacks.mm",
     "rpcs3/ios/IOSCoreSaveDialog.h",
@@ -43,6 +44,7 @@ def main() -> int:
     cmake = read("rpcs3/ios/CoreExtensions.cmake")
     callback = read("rpcs3/ios/IOSCoreCallbacks.mm")
     composite = read("rpcs3/ios/IOSCoreCallbacksComposite.cpp")
+    event_wrapper = read("rpcs3/ios/IOSCoreEventCallback.mm")
     image = read("rpcs3/ios/IOSCoreImageCallbacks.mm")
     bounded_save = read("rpcs3/ios/IOSCoreSaveDialog.mm")
     defaults = read("rpcs3/ios/IOSCoreDefaults.cpp")
@@ -52,9 +54,11 @@ def main() -> int:
     for contract in (
         "IOSCoreCallbacks.mm",
         "IOSCoreCallbacksComposite.cpp",
+        "IOSCoreEventCallback.mm",
         "IOSCoreImageCallbacks.mm",
         "IOSCoreSaveDialog.mm",
         "extend_core_callbacks=extend_core_callbacks_base",
+        "rpcs3_ios_core_set_event_callback=rpcs3_ios_core_set_event_callback_base",
     ):
         require(errors, contract in cmake, f"callback composition build contract is missing: {contract}")
 
@@ -73,6 +77,14 @@ def main() -> int:
         "extend_core_save_dialog_callback",
     ):
         require(errors, contract in composite, f"callback composition ordering is missing: {contract}")
+
+    for contract in (
+        "rpcs3_ios_core_set_event_callback_base",
+        "NSThread.isMainThread",
+        "dispatch_sync(dispatch_get_main_queue()",
+        "waits for any in-flight callback",
+    ):
+        require(errors, contract in event_wrapper, f"main-queue event mutation contract is missing: {contract}")
 
     for contract in (
         "preferredFilenameExtension",
@@ -112,6 +124,7 @@ def main() -> int:
         require(errors, contract in defaults, f"hosted Vulkan/headless contract is missing: {contract}")
 
     require(errors, "extend_core_callbacks(callbacks)" in emulator, "emulator callback table is not extended")
+    require(errors, "g_event_generation" in emulator, "queued event generation guard is missing")
 
     for contract in (
         "Firmware installation",
