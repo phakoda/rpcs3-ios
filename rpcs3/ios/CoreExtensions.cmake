@@ -29,7 +29,7 @@ if(TARGET rpcs3_ios_core_framework)
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreSaveDialog.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreSettings.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreSettings.mm"
-        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreLibrary.cpp"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreLibrary.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstaller.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstaller.cpp")
 endif()
