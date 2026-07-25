@@ -49,7 +49,4 @@ if(TARGET rpcs3_ios_core_framework)
         SOVERSION 0.4)
 endif()
 
-if(TARGET rpcs3_ios_core_link)
-    target_sources(rpcs3_ios_core_link PRIVATE
-        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreOpenURL.mm")
-endif()
+include("${CMAKE_SOURCE_DIR}/rpcs3/ios/PatchCoreHost.cmake")
