@@ -8,6 +8,8 @@ endif()
 
 if(TARGET rpcs3_ios_core_framework)
     target_sources(rpcs3_ios_core_framework PRIVATE
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacks.h"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacks.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreSettings.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreSettings.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreLibrary.cpp"
