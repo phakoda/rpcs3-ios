@@ -19,7 +19,7 @@ REQUIRED_FILES = (
     "3rdparty/ios/libusb/include/libusb.h",
     "3rdparty/ios/libusb/libusb_stub.cpp",
     "3rdparty/ios/rtmidi/include/rtmidi_c.h",
-    "3rdparty/ios/rtmidi/rtmidi_stub.cpp",
+    "3rdparty/ios/rtmidi/rtmidi_coremidi.cpp",
     "buildfiles/ios/create_core_xcframework.sh",
     "rpcs3/ios/CoreAnchor.cpp",
     "rpcs3/ios/CoreExtensions.cmake",
@@ -33,9 +33,11 @@ REQUIRED_FILES = (
     "rpcs3/ios/IOSCoreGSFrame.mm",
     "rpcs3/ios/IOSCoreInstaller.h",
     "rpcs3/ios/IOSCoreInstaller.cpp",
-    "rpcs3/ios/IOSCoreLibrary.cpp",
+    "rpcs3/ios/IOSCoreLibrary.mm",
     "rpcs3/ios/IOSCoreLifecycle.h",
     "rpcs3/ios/IOSCoreLifecycle.cpp",
+    "rpcs3/ios/IOSCoreMIDI.h",
+    "rpcs3/ios/IOSCoreMIDI.mm",
     "rpcs3/ios/IOSCoreMouseGyro.cpp",
     "rpcs3/ios/IOSCoreSettings.h",
     "rpcs3/ios/IOSCoreSettings.mm",
@@ -44,6 +46,13 @@ REQUIRED_FILES = (
     "rpcs3/ios/RPCS3Core.exports",
     "rpcs3/ios/RPCS3Core.modulemap",
     "rpcs3/ios/RPCS3Core-Info.plist.in",
+)
+
+OBSOLETE_FILES = (
+    "3rdparty/ios/rtmidi/rtmidi_stub.cpp",
+    "rpcs3/ios/IOSCoreLibrary.cpp",
+    "rpcs3/ios/IOSHeadlessCore.h",
+    "rpcs3/ios/IOSHeadlessCore.cpp",
 )
 
 PUBLIC_BOOT_ENUMS = (
@@ -69,9 +78,11 @@ PUBLIC_BOOT_ENUMS = (
 
 CORE_IMPLEMENTATION_FILES = (
     "rpcs3/ios/RPCS3Core.mm",
+    "rpcs3/ios/IOSCoreEventCallback.mm",
     "rpcs3/ios/IOSCoreEmulator.mm",
     "rpcs3/ios/IOSCoreInstaller.cpp",
-    "rpcs3/ios/IOSCoreLibrary.cpp",
+    "rpcs3/ios/IOSCoreLibrary.mm",
+    "rpcs3/ios/IOSCoreMIDI.mm",
     "rpcs3/ios/IOSCoreSettings.mm",
 )
 
@@ -93,10 +104,23 @@ REQUIRED_PUBLIC_APIS = (
     "rpcs3_ios_core_set_configuration",
     "rpcs3_ios_core_reset_configuration",
     "rpcs3_ios_core_add_game_directory",
+    "rpcs3_ios_core_remove_game_directory",
+    "rpcs3_ios_core_rescan_game_directories",
+    "rpcs3_ios_core_prune_missing_game_directories",
+    "rpcs3_ios_core_clear_game_directories",
     "rpcs3_ios_core_add_game",
     "rpcs3_ios_core_remove_game",
     "rpcs3_ios_core_game_count",
     "rpcs3_ios_core_copy_game",
+    "rpcs3_ios_core_game_directory_count",
+    "rpcs3_ios_core_copy_game_directory",
+    "rpcs3_ios_core_midi_source_count",
+    "rpcs3_ios_core_copy_midi_source",
+    "rpcs3_ios_core_midi_slot_count",
+    "rpcs3_ios_core_set_midi_assignment",
+    "rpcs3_ios_core_clear_midi_assignment",
+    "rpcs3_ios_core_copy_midi_assignment",
+    "rpcs3_ios_core_clear_all_midi_assignments",
     "rpcs3_ios_core_install_firmware",
     "rpcs3_ios_core_install_package",
     "rpcs3_ios_core_request_installation_cancel",
@@ -117,9 +141,8 @@ def require(errors: list[str], condition: bool, message: str) -> None:
 def validate_files(errors: list[str]) -> None:
     for relative in REQUIRED_FILES:
         require(errors, (ROOT / relative).is_file(), f"missing core source: {relative}")
-
-    for obsolete in ("rpcs3/ios/IOSHeadlessCore.h", "rpcs3/ios/IOSHeadlessCore.cpp"):
-        require(errors, not (ROOT / obsolete).exists(), f"duplicate lifecycle bridge must remain removed: {obsolete}")
+    for obsolete in OBSOLETE_FILES:
+        require(errors, not (ROOT / obsolete).exists(), f"obsolete iOS source must remain removed: {obsolete}")
 
 
 def public_functions(header: str) -> set[str]:
@@ -151,7 +174,6 @@ def validate_public_api(errors: list[str]) -> None:
 
     for function in sorted(exports - declarations):
         errors.append(f"exported core function is not declared in RPCS3Core.h: {function}")
-
     for required in REQUIRED_PUBLIC_APIS:
         require(errors, required in declarations, f"required public API is missing: {required}")
 
@@ -161,6 +183,15 @@ def validate_public_api(errors: list[str]) -> None:
             re.search(rf"\b{re.escape(name)}\s*=\s*{value}\b", header) is not None,
             f"public boot enum no longer mirrors game_boot_result at value {value}: {name}",
         )
+
+    for value, name in enumerate((
+        "RPCS3_IOS_MIDI_KEYBOARD",
+        "RPCS3_IOS_MIDI_GUITAR_17_FRET",
+        "RPCS3_IOS_MIDI_GUITAR_22_FRET",
+        "RPCS3_IOS_MIDI_DRUMS",
+    )):
+        require(errors, re.search(rf"\b{name}\s*=\s*{value}\b", header) is not None,
+                f"public MIDI enum is not stable at value {value}: {name}")
 
     require(errors, "RPCS3_IOS_CORE_CANCELLED = 8" in header, "cancelled result value is missing")
     require(errors, "g_pending_import_source" in implementations, "import-size probing is not side-effect cached")
@@ -184,12 +215,15 @@ def validate_link_graph(errors: list[str]) -> None:
     require(errors, "CoreExtensions.cmake" in root_cmake, "root CMake does not include core extensions")
     for source in (
         "IOSCoreSettings.mm",
-        "IOSCoreLibrary.cpp",
+        "IOSCoreMIDI.mm",
+        "IOSCoreLibrary.mm",
         "IOSCoreInstaller.cpp",
     ):
         require(errors, source in extensions, f"core extension source is not linked: {source}")
 
     for contract in (
+        "VERSION 0.4.0",
+        "SOVERSION 0.4",
         "$<LINK_LIBRARY:WHOLE_ARCHIVE,rpcs3_emu>",
         "rpcs3_ios_core_framework",
         "FRAMEWORK TRUE",
@@ -207,7 +241,7 @@ def validate_link_graph(errors: list[str]) -> None:
         "3rdparty::vulkan",
         "XCODE_ATTRIBUTE_LD_GENERATE_MAP_FILE",
     ):
-        require(errors, contract in patch, f"core framework link contract is missing: {contract}")
+        require(errors, contract in extensions or contract in patch, f"core framework link contract is missing: {contract}")
 
     for contract in (
         "-Wl,-force_load,$<TARGET_FILE:rpcs3_emu>",
@@ -219,15 +253,16 @@ def validate_link_graph(errors: list[str]) -> None:
     for contract in (
         "add_library(3rdparty_libusb STATIC",
         "add_library(3rdparty_rtmidi STATIC",
+        "rtmidi_coremidi.cpp",
+        "RPCS3_IOS_COREMIDI",
         "add_library(3rdparty::ios_system ALIAS",
         "RPCS3_IOS_NO_USB_PASSTHROUGH",
-        "RPCS3_IOS_NO_MIDI_INPUT",
         "RPCS3_IOS_AVFORMAT",
         "RPCS3_IOS_AVCODEC",
         "RPCS3_IOS_AVUTIL",
     ):
         require(errors, contract in dependencies, f"concrete iOS dependency contract is missing: {contract}")
-
+    require(errors, "RPCS3_IOS_NO_MIDI_INPUT" not in dependencies, "CoreMIDI build still declares MIDI unavailable")
     require(errors, dependencies.count('"${RPCS3_IOS_AVCODEC}"') >= 2, "static FFmpeg closure no longer repeats avcodec")
     require(errors, dependencies.count('"${RPCS3_IOS_AVUTIL}"') >= 2, "static FFmpeg closure no longer repeats avutil")
 
@@ -236,7 +271,7 @@ def validate_compatibility_abis(errors: list[str]) -> None:
     libusb_header = read("3rdparty/ios/libusb/include/libusb.h")
     libusb_source = read("3rdparty/ios/libusb/libusb_stub.cpp")
     rtmidi_header = read("3rdparty/ios/rtmidi/include/rtmidi_c.h")
-    rtmidi_source = read("3rdparty/ios/rtmidi/rtmidi_stub.cpp")
+    rtmidi_source = read("3rdparty/ios/rtmidi/rtmidi_coremidi.cpp")
 
     for function in (
         "libusb_init", "libusb_get_device_list", "libusb_get_device_descriptor",
@@ -251,11 +286,24 @@ def validate_compatibility_abis(errors: list[str]) -> None:
 
     for function in (
         "rtmidi_in_create_default", "rtmidi_in_free", "rtmidi_in_get_current_api",
-        "rtmidi_in_get_message", "rtmidi_get_port_count", "rtmidi_get_port_name",
-        "rtmidi_open_port", "rtmidi_close_port",
+        "rtmidi_in_ignore_types", "rtmidi_in_get_message", "rtmidi_get_port_count",
+        "rtmidi_get_port_name", "rtmidi_open_port", "rtmidi_close_port",
     ):
-        require(errors, function in rtmidi_header, f"RtMidi compatibility declaration is missing: {function}")
-        require(errors, function in rtmidi_source, f"RtMidi compatibility implementation is missing: {function}")
+        require(errors, function in rtmidi_header, f"RtMidi declaration is missing: {function}")
+        require(errors, function in rtmidi_source, f"CoreMIDI RtMidi implementation is missing: {function}")
+
+    for contract in (
+        "MIDIClientCreate",
+        "MIDIInputPortCreate",
+        "MIDIPortConnectSource",
+        "MIDIPortDisconnectSource",
+        "MIDIPacketNext",
+        "running_status",
+        "pending_size",
+        "maximum_queued_messages",
+        "mach_timebase_info",
+    ):
+        require(errors, contract in rtmidi_source, f"CoreMIDI input contract is missing: {contract}")
 
 
 def validate_mobile_features(errors: list[str]) -> None:
@@ -266,7 +314,8 @@ def validate_mobile_features(errors: list[str]) -> None:
     gs_frame = read("rpcs3/ios/IOSCoreGSFrame.mm")
     lifecycle = read("rpcs3/ios/IOSCoreLifecycle.cpp")
     settings = read("rpcs3/ios/IOSCoreSettings.mm")
-    library = read("rpcs3/ios/IOSCoreLibrary.cpp")
+    midi = read("rpcs3/ios/IOSCoreMIDI.mm")
+    library = read("rpcs3/ios/IOSCoreLibrary.mm")
     installer = read("rpcs3/ios/IOSCoreInstaller.cpp")
     core = read("rpcs3/ios/RPCS3Core.mm")
     consumer = read("rpcs3/ios/CoreLinkMain.mm")
@@ -294,10 +343,33 @@ def validate_mobile_features(errors: list[str]) -> None:
         require(errors, contract in settings, f"persistent settings contract is missing: {contract}")
 
     for contract in (
-        "Emu.AddGamesFromDir", "Emu.AddGame", "Emu.RemoveGameFromYml",
-        "GetGamesConfig().get_games", "GetGameDirs",
+        "RPCS3Core.Library.GameDirectories",
+        "stringByStandardizingPath",
+        "Emu.AddGamesFromDir",
+        "Emu.RemoveGamesFromDir",
+        "Emu.AddGame",
+        "Emu.RemoveGameFromYml",
+        "GetGamesConfig().get_games",
+        "rpcs3_ios_core_rescan_game_directories",
+        "rpcs3_ios_core_prune_missing_game_directories",
+        "rpcs3_ios_core_clear_game_directories",
     ):
-        require(errors, contract in library, f"game-library contract is missing: {contract}")
+        require(errors, contract in library, f"persistent game-library contract is missing: {contract}")
+    require(errors, "GetGameDirs" not in library, "library roots incorrectly use current-title GetGameDirs semantics")
+
+    for contract in (
+        "RPCS3Core.MIDI.Assignments",
+        "max_midi_devices == 3",
+        'result += "ßßß"',
+        'result += "@@@"',
+        "MIDIGetNumberOfSources",
+        "apply_core_midi_configuration",
+        "rpcs3_ios_core_set_midi_assignment",
+        "rpcs3_ios_core_clear_all_midi_assignments",
+    ):
+        require(errors, contract in midi, f"CoreMIDI assignment contract is missing: {contract}")
+    require(errors, 'g_cfg.io.midi_devices = ""' not in defaults, "compatibility policy still clears CoreMIDI mappings")
+    require(errors, "apply_core_midi_configuration" in defaults, "MIDI assignments are not reapplied before boot")
 
     for contract in (
         "pup_object", "SCEDecrypter", "package_reader::extract_data", 'vfs::mount("/dev_flash"',
@@ -309,6 +381,9 @@ def validate_mobile_features(errors: list[str]) -> None:
     require(errors, "g_initialized.exchange(false)" in core, "shutdown does not close operation admission before drain")
     require(errors, "load_core_configuration" in core, "persistent settings are not loaded during core initialization")
     require(errors, "shutdown_core_installer" in core, "installer is not drained during core teardown")
+    require(errors, "RPCS3CoreVersionNumber = 0.4" in core, "public framework runtime version is not 0.4")
+    require(errors, core.count("apply_core_compatibility_defaults();") >= 3,
+            "render attachment or initialization does not synchronize compatibility state")
 
     for contract in (
         "rpcs3_ios_core_set_render_view", "rpcs3_ios_core_install_firmware",
@@ -326,8 +401,8 @@ def validate_packaging(errors: list[str]) -> None:
     with plist_path.open("rb") as stream:
         framework_info = plistlib.load(stream)
 
-    require(errors, framework_info.get("CFBundleShortVersionString") == "0.3", "framework short version is not 0.3")
-    require(errors, framework_info.get("CFBundleVersion") == "3", "framework bundle version is not 3")
+    require(errors, framework_info.get("CFBundleShortVersionString") == "0.4", "framework short version is not 0.4")
+    require(errors, framework_info.get("CFBundleVersion") == "4", "framework bundle version is not 4")
     require(errors, script.startswith("#!/usr/bin/env bash\n"), "XCFramework helper lacks the expected Bash shebang")
     require(errors, "set -euo pipefail" in script, "XCFramework helper lacks strict mode")
     for contract in (
@@ -356,7 +431,7 @@ def main() -> int:
             print(f"error: {error}", file=sys.stderr)
         return 1
 
-    print("RPCS3 iOS core source/link/management contracts passed (no Apple build or installation performed).")
+    print("RPCS3 iOS core 0.4 source/link/library/CoreMIDI contracts passed (no Apple build or execution performed).")
     return 0
 
 
