@@ -2,7 +2,7 @@
 """Static validation for the iOS port that does not require Xcode.
 
 This deliberately checks source invariants only. It does not claim that an iOS
-SDK build, application launch, JIT execution, or emulator workload succeeds.
+SDK build, application launch, installation, JIT execution, or workload succeeds.
 """
 
 from __future__ import annotations
@@ -31,6 +31,12 @@ REQUIRED_FILES = (
     "buildfiles/ios/report_signing.sh",
     "rpcs3/ios/CMakeLists.txt",
     "rpcs3/ios/PatchCoreSources.cmake",
+    "rpcs3/ios/CoreExtensions.cmake",
+    "rpcs3/ios/IOSCoreSettings.h",
+    "rpcs3/ios/IOSCoreSettings.mm",
+    "rpcs3/ios/IOSCoreLibrary.cpp",
+    "rpcs3/ios/IOSCoreInstaller.h",
+    "rpcs3/ios/IOSCoreInstaller.cpp",
     "rpcs3/ios/IOSBootstrapViewController.h",
     "rpcs3/ios/IOSBootstrapViewController.mm",
     "rpcs3/ios/IOSVulkanProbe.h",
@@ -54,6 +60,7 @@ REQUIRED_FILES = (
 
 PLISTS = (
     "rpcs3/ios/Info.plist.in",
+    "rpcs3/ios/RPCS3Core-Info.plist.in",
     "rpcs3/ios/JIT.entitlements",
     "rpcs3/ios/Research.entitlements",
 )
@@ -201,9 +208,15 @@ def validate_cmake_contracts(root: Path, errors: list[str]) -> None:
         "RPCS3_IOS_BOOTSTRAP_ONLY",
         "3rdparty/ios.cmake",
         "PatchCoreSources.cmake",
+        "CoreExtensions.cmake",
     ):
         if contract not in root_cmake:
             fail(errors, f"root CMake contract missing: {contract}")
+
+    extensions = (root / "rpcs3/ios/CoreExtensions.cmake").read_text(encoding="utf-8")
+    for contract in ("IOSCoreSettings.mm", "IOSCoreLibrary.cpp", "IOSCoreInstaller.cpp"):
+        if contract not in extensions:
+            fail(errors, f"core extension build contract missing: {contract}")
 
     configure = (root / "buildfiles/cmake/ConfigureIOS.cmake").read_text(encoding="utf-8")
     for option in (
