@@ -60,43 +60,38 @@ if(TARGET rpcs3_emu)
     target_sources(rpcs3_emu PRIVATE "${_vm_generated}")
 endif()
 
-# Generate a Qt-free gameplay pad thread for RPCS3Core.framework. The upstream
-# pad thread's core state and USB/LDD behavior are retained, unsupported desktop
-# HID factories resolve to NullPadHandler, keyboard-window code is compiled out,
-# and the native GameController implementation is inserted explicitly.
+# The core framework cannot depend on Qt's keyboard and HID handlers. Generate
+# a pad thread that keeps RPCS3's normal device binding/state machinery while
+# substituting Null handlers for unavailable desktop backends and adding the
+# native iOS GameController handler.
 set(_core_pad_source "${CMAKE_SOURCE_DIR}/rpcs3/Input/pad_thread.cpp")
 set(_core_pad_generated "${_ios_generated_dir}/pad_thread_ios_core.cpp")
 file(READ "${_core_pad_source}" _core_pad_contents)
-foreach(_include IN ITEMS
-    "#include \"ds3_pad_handler.h\"\n"
-    "#include \"ds4_pad_handler.h\"\n"
-    "#include \"dualsense_pad_handler.h\"\n"
-    "#include \"skateboard_pad_handler.h\"\n"
-    "#include \"ps_move_handler.h\"\n")
-    string(REPLACE "${_include}" "" _core_pad_contents "${_core_pad_contents}")
-endforeach()
-string(REPLACE "#include \"Emu/Io/Null/NullPadHandler.h\""
-    "#include \"Emu/Io/Null/NullPadHandler.h\"\n#include \"ios_gamecontroller_pad_handler.h\""
+string(REPLACE "#include \"keyboard_pad_handler.h\"\n" "" _core_pad_contents "${_core_pad_contents}")
+string(REPLACE "#include \"ds3_pad_handler.h\"\n" "" _core_pad_contents "${_core_pad_contents}")
+string(REPLACE "#include \"ds4_pad_handler.h\"\n" "" _core_pad_contents "${_core_pad_contents}")
+string(REPLACE "#include \"dualsense_pad_handler.h\"\n" "" _core_pad_contents "${_core_pad_contents}")
+string(REPLACE "#include \"evdev_joystick_handler.h\"\n" "" _core_pad_contents "${_core_pad_contents}")
+string(REPLACE "#include \"hid_pad_handler.h\"\n" "" _core_pad_contents "${_core_pad_contents}")
+string(REPLACE "#include \"mm_joystick_handler.h\"\n" "" _core_pad_contents "${_core_pad_contents}")
+string(REPLACE "#include \"ps_move_handler.h\"\n" "" _core_pad_contents "${_core_pad_contents}")
+string(REPLACE "#include \"skateboard_pad_handler.h\"\n" "" _core_pad_contents "${_core_pad_contents}")
+string(REPLACE "#include \"xinput_pad_handler.h\"\n" "" _core_pad_contents "${_core_pad_contents}")
+string(REPLACE
+    "#include \"Null/NullPadHandler.h\""
+    "#include \"Null/NullPadHandler.h\"\n#include \"ios_gamecontroller_pad_handler.h\""
     _core_pad_contents "${_core_pad_contents}")
-string(REPLACE "#ifndef ANDROID"
-    "#if !defined(ANDROID) && !defined(RPCS3_IOS_CORE)"
-    _core_pad_contents "${_core_pad_contents}")
-foreach(_handler IN ITEMS ds3 ds4 dualsense skateboard move)
-    if(_handler STREQUAL "ds3")
-        set(_class ds3_pad_handler)
-    elseif(_handler STREQUAL "ds4")
-        set(_class ds4_pad_handler)
-    elseif(_handler STREQUAL "dualsense")
-        set(_class dualsense_pad_handler)
-    elseif(_handler STREQUAL "skateboard")
-        set(_class skateboard_pad_handler)
-    else()
-        set(_class ps_move_handler)
-    endif()
-    string(REPLACE
-        "\tcase pad_handler::${_handler}:\n\t\treturn std::make_shared<${_class}>();"
-        "\tcase pad_handler::${_handler}:\n\t\treturn std::make_shared<NullPadHandler>();"
-        _core_pad_contents "${_core_pad_contents}")
+foreach(_unsupported_factory
+    "return std::make_shared<ds3_pad_handler>();"
+    "return std::make_shared<ds4_pad_handler>();"
+    "return std::make_shared<dualsense_pad_handler>();"
+    "return std::make_shared<evdev_joystick_handler>();"
+    "return std::make_shared<hid_pad_handler>();"
+    "return std::make_shared<mm_joystick_handler>();"
+    "return std::make_shared<ps_move_handler>();"
+    "return std::make_shared<skateboard_pad_handler>();"
+    "return std::make_shared<xinput_pad_handler>();")
+    string(REPLACE "${_unsupported_factory}" "return std::make_shared<NullPadHandler>();" _core_pad_contents "${_core_pad_contents}")
 endforeach()
 string(REPLACE
     "\tcase pad_handler::move:\n\t\treturn std::make_shared<NullPadHandler>();"
@@ -159,8 +154,8 @@ if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_fram
         OUTPUT_NAME "RPCS3Core"
         FRAMEWORK TRUE
         FRAMEWORK_VERSION A
-        VERSION 0.2.0
-        SOVERSION 0.2
+        VERSION 0.3.0
+        SOVERSION 0.3
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN YES
         PUBLIC_HEADER "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.h"
@@ -192,22 +187,12 @@ if(TARGET rpcs3_ios_core AND TARGET rpcs3_emu AND NOT TARGET rpcs3_ios_core_fram
         XCODE_EMBED_FRAMEWORKS "$<TARGET_BUNDLE_DIR:rpcs3_ios_core_framework>"
         XCODE_EMBED_FRAMEWORKS_CODE_SIGN_ON_COPY YES
         XCODE_EMBED_FRAMEWORKS_REMOVE_HEADERS_ON_COPY YES
-        XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC YES
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "net.rpcs3.ios.core.link"
         XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-        XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
         XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "iphoneos iphonesimulator"
         XCODE_ATTRIBUTE_SUPPORTS_MACCATALYST "NO"
         XCODE_ATTRIBUTE_ENABLE_BITCODE NO
         XCODE_ATTRIBUTE_SKIP_INSTALL NO)
-
-    if(RPCS3_IOS_ENTITLEMENTS_FILE)
-        set_target_properties(rpcs3_ios_core_link PROPERTIES
-            XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${RPCS3_IOS_ENTITLEMENTS_FILE}")
-    elseif(RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS)
-        set_target_properties(rpcs3_ios_core_link PROPERTIES
-            XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_SOURCE_DIR}/rpcs3/ios/JIT.entitlements")
-    endif()
 
     add_dependencies(rpcs3_ios_core
         rpcs3_ios_core_framework
