@@ -14,6 +14,8 @@ REQUIRED_FILES = (
     "rpcs3/ios/IOSCoreCallbacks.h",
     "rpcs3/ios/IOSCoreCallbacks.mm",
     "rpcs3/ios/IOSCoreCallbacksComposite.cpp",
+    "rpcs3/ios/IOSCoreImageCallbacks.h",
+    "rpcs3/ios/IOSCoreImageCallbacks.mm",
     "rpcs3/ios/IOSCoreSaveDialog.h",
     "rpcs3/ios/IOSCoreSaveDialog.mm",
 )
@@ -41,6 +43,7 @@ def main() -> int:
     cmake = read("rpcs3/ios/CoreExtensions.cmake")
     callback = read("rpcs3/ios/IOSCoreCallbacks.mm")
     composite = read("rpcs3/ios/IOSCoreCallbacksComposite.cpp")
+    image = read("rpcs3/ios/IOSCoreImageCallbacks.mm")
     bounded_save = read("rpcs3/ios/IOSCoreSaveDialog.mm")
     defaults = read("rpcs3/ios/IOSCoreDefaults.cpp")
     emulator = read("rpcs3/ios/IOSCoreEmulator.mm")
@@ -49,6 +52,7 @@ def main() -> int:
     for contract in (
         "IOSCoreCallbacks.mm",
         "IOSCoreCallbacksComposite.cpp",
+        "IOSCoreImageCallbacks.mm",
         "IOSCoreSaveDialog.mm",
         "extend_core_callbacks=extend_core_callbacks_base",
     ):
@@ -59,18 +63,27 @@ def main() -> int:
         "class ios_osk_dialog",
         "class ios_save_dialog",
         "class ios_trophy_notification",
-        "CGImageSourceCopyPropertiesAtIndex",
-        "CGImageSourceCreateThumbnailAtIndex",
-        "CGBitmapContextCreate",
         "extend_core_callbacks",
     ):
         require(errors, contract in callback, f"native callback contract is missing: {contract}")
 
     for contract in (
         "extend_core_callbacks_base",
+        "extend_core_image_callbacks",
         "extend_core_save_dialog_callback",
     ):
         require(errors, contract in composite, f"callback composition ordering is missing: {contract}")
+
+    for contract in (
+        "preferredFilenameExtension",
+        "case 6: return 2",
+        "case 3: return 3",
+        "case 8: return 4",
+        "CGImageSourceCreateThumbnailAtIndex",
+        "CGBitmapContextCreate",
+        "straight RGBA8888",
+    ):
+        require(errors, contract in image, f"contract-compatible ImageIO behavior is missing: {contract}")
 
     for contract in (
         "NSArray<NSString*>* immutable_titles",
@@ -90,7 +103,9 @@ def main() -> int:
 
     for contract in (
         "#ifdef RPCS3_IOS_CORE",
+        "extern atomic_t<bool> g_headless",
         "const bool has_render_host = has_core_render_view()",
+        "g_headless = !has_render_host",
         "Emu.SetHeadless(!has_render_host)",
         "has_render_host ? video_renderer::vulkan : video_renderer::null",
     ):
