@@ -24,15 +24,6 @@ bool library_mutation_allowed()
     return Emulator::IsAvailable() && Emu.IsStopped(true);
 }
 
-std::string normalized_directory(std::string path)
-{
-    while (path.size() > 1 && (path.back() == '/' || path.back() == '\\'))
-    {
-        path.pop_back();
-    }
-    return path;
-}
-
 NSString* ns_utf8(const std::string& value)
 {
     return [[NSString alloc] initWithBytes:value.data()
@@ -44,6 +35,22 @@ std::string utf8_string(NSString* value)
 {
     const char* bytes = value.UTF8String;
     return bytes ? std::string(bytes) : std::string{};
+}
+
+std::string normalized_directory(const std::string& path)
+{
+    if (path.empty())
+    {
+        return {};
+    }
+
+    NSString* standardized = ns_utf8(path).stringByStandardizingPath;
+    std::string result = utf8_string(standardized);
+    while (result.size() > 1 && (result.back() == '/' || result.back() == '\\'))
+    {
+        result.pop_back();
+    }
+    return result;
 }
 
 std::vector<std::string> load_registered_directories()
@@ -64,12 +71,19 @@ std::vector<std::string> load_registered_directories()
 
 void save_registered_directories(const std::vector<std::string>& directories)
 {
+    NSUserDefaults* defaults = NSUserDefaults.standardUserDefaults;
+    if (directories.empty())
+    {
+        [defaults removeObjectForKey:game_directories_key];
+        return;
+    }
+
     NSMutableArray<NSString*>* values = [NSMutableArray arrayWithCapacity:directories.size()];
     for (const std::string& path : directories)
     {
         [values addObject:ns_utf8(path)];
     }
-    [NSUserDefaults.standardUserDefaults setObject:values forKey:game_directories_key];
+    [defaults setObject:values forKey:game_directories_key];
 }
 
 bool register_directory(const std::string& path)
@@ -206,15 +220,17 @@ rpcs3_ios_core_result rpcs3_ios_core_remove_game_directory(
     try
     {
         const std::string directory = normalized_directory(path);
-        *removed_games = remove_library_entries
-            ? Emu.RemoveGamesFromDir(directory, {}, true)
-            : 0;
-        if (!unregister_directory(directory))
+        const std::vector<std::string> directories = load_registered_directories();
+        if (std::find(directories.begin(), directories.end(), directory) == directories.end())
         {
             rpcs3::ios::set_core_last_error("The requested game directory was not registered.");
             return RPCS3_IOS_CORE_INVALID_ARGUMENT;
         }
 
+        *removed_games = remove_library_entries
+            ? Emu.RemoveGamesFromDir(directory, {}, true)
+            : 0;
+        unregister_directory(directory);
         rpcs3::ios::set_core_last_error({});
         return RPCS3_IOS_CORE_SUCCESS;
     }
@@ -270,6 +286,105 @@ rpcs3_ios_core_result rpcs3_ios_core_rescan_game_directories(uint32_t* added_gam
     catch (...)
     {
         rpcs3::ios::set_core_last_error("Game-directory rescan failed with an unknown exception.");
+        return RPCS3_IOS_CORE_PLATFORM_ERROR;
+    }
+}
+
+rpcs3_ios_core_result rpcs3_ios_core_prune_missing_game_directories(uint32_t* removed_directories)
+{
+    if (!rpcs3_ios_core_is_initialized())
+    {
+        return RPCS3_IOS_CORE_NOT_INITIALIZED;
+    }
+    if (!removed_directories)
+    {
+        rpcs3::ios::set_core_last_error("A removed-directory output is required.");
+        return RPCS3_IOS_CORE_INVALID_ARGUMENT;
+    }
+    if (!library_mutation_allowed())
+    {
+        rpcs3::ios::set_core_last_error("Game directories can be pruned only while emulation is fully stopped.");
+        return RPCS3_IOS_CORE_BUSY;
+    }
+
+    std::lock_guard lock(g_library_mutex);
+    try
+    {
+        std::vector<std::string> directories = load_registered_directories();
+        const size_t original_size = directories.size();
+        directories.erase(std::remove_if(directories.begin(), directories.end(),
+            [](const std::string& directory)
+            {
+                return !fs::is_dir(directory);
+            }), directories.end());
+        save_registered_directories(directories);
+        *removed_directories = static_cast<uint32_t>(original_size - directories.size());
+        rpcs3::ios::set_core_last_error({});
+        return RPCS3_IOS_CORE_SUCCESS;
+    }
+    catch (const std::exception& exception)
+    {
+        rpcs3::ios::set_core_last_error(std::string("Pruning game directories failed: ") + exception.what());
+        return RPCS3_IOS_CORE_PLATFORM_ERROR;
+    }
+    catch (...)
+    {
+        rpcs3::ios::set_core_last_error("Pruning game directories failed with an unknown exception.");
+        return RPCS3_IOS_CORE_PLATFORM_ERROR;
+    }
+}
+
+rpcs3_ios_core_result rpcs3_ios_core_clear_game_directories(
+    uint8_t remove_library_entries,
+    uint32_t* removed_games)
+{
+    if (!rpcs3_ios_core_is_initialized())
+    {
+        return RPCS3_IOS_CORE_NOT_INITIALIZED;
+    }
+    if (!removed_games)
+    {
+        rpcs3::ios::set_core_last_error("A removed-game output is required.");
+        return RPCS3_IOS_CORE_INVALID_ARGUMENT;
+    }
+    if (!library_mutation_allowed())
+    {
+        rpcs3::ios::set_core_last_error("Game directories can be cleared only while emulation is fully stopped.");
+        return RPCS3_IOS_CORE_BUSY;
+    }
+
+    std::lock_guard lock(g_library_mutex);
+    try
+    {
+        uint32_t total = 0;
+        const std::vector<std::string> directories = load_registered_directories();
+        if (remove_library_entries)
+        {
+            for (const std::string& directory : directories)
+            {
+                total += Emu.RemoveGamesFromDir(directory, {}, false);
+            }
+            // Persist the batched games.yml mutations once.
+            if (Emu.GetGamesConfig().is_dirty() && !Emu.GetGamesConfig().save())
+            {
+                rpcs3::ios::set_core_last_error("Registered directories were cleared, but games.yml could not be saved.");
+                return RPCS3_IOS_CORE_PLATFORM_ERROR;
+            }
+        }
+
+        save_registered_directories({});
+        *removed_games = total;
+        rpcs3::ios::set_core_last_error({});
+        return RPCS3_IOS_CORE_SUCCESS;
+    }
+    catch (const std::exception& exception)
+    {
+        rpcs3::ios::set_core_last_error(std::string("Clearing game directories failed: ") + exception.what());
+        return RPCS3_IOS_CORE_PLATFORM_ERROR;
+    }
+    catch (...)
+    {
+        rpcs3::ios::set_core_last_error("Clearing game directories failed with an unknown exception.");
         return RPCS3_IOS_CORE_PLATFORM_ERROR;
     }
 }
