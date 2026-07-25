@@ -33,6 +33,7 @@ REQUIRED_FILES = (
     "rpcs3/ios/IOSCoreGSFrame.mm",
     "rpcs3/ios/IOSCoreInstaller.h",
     "rpcs3/ios/IOSCoreInstaller.cpp",
+    "rpcs3/ios/IOSCoreInstallationStatus.cpp",
     "rpcs3/ios/IOSCoreLibrary.mm",
     "rpcs3/ios/IOSCoreLifecycle.h",
     "rpcs3/ios/IOSCoreLifecycle.cpp",
@@ -81,6 +82,7 @@ CORE_IMPLEMENTATION_FILES = (
     "rpcs3/ios/IOSCoreEventCallback.mm",
     "rpcs3/ios/IOSCoreEmulator.mm",
     "rpcs3/ios/IOSCoreInstaller.cpp",
+    "rpcs3/ios/IOSCoreInstallationStatus.cpp",
     "rpcs3/ios/IOSCoreLibrary.mm",
     "rpcs3/ios/IOSCoreMIDI.mm",
     "rpcs3/ios/IOSCoreSettings.mm",
@@ -124,6 +126,8 @@ REQUIRED_PUBLIC_APIS = (
     "rpcs3_ios_core_install_firmware",
     "rpcs3_ios_core_install_package",
     "rpcs3_ios_core_request_installation_cancel",
+    "rpcs3_ios_core_query_installation_status",
+    "rpcs3_ios_core_copy_installation_detail",
     "rpcs3_ios_core_copy_firmware_version",
     "rpcs3_ios_core_copy_last_installed_path",
 )
@@ -193,6 +197,18 @@ def validate_public_api(errors: list[str]) -> None:
         require(errors, re.search(rf"\b{name}\s*=\s*{value}\b", header) is not None,
                 f"public MIDI enum is not stable at value {value}: {name}")
 
+    for field in (
+        "struct_size",
+        "active",
+        "cancel_requested",
+        "kind",
+        "stage",
+        "completed",
+        "total",
+    ):
+        require(errors, re.search(rf"typedef struct rpcs3_ios_installation_status[\s\S]*?\b{field}\b", header) is not None,
+                f"installation status ABI field is missing: {field}")
+
     require(errors, "RPCS3_IOS_CORE_CANCELLED = 8" in header, "cancelled result value is missing")
     require(errors, "g_pending_import_source" in implementations, "import-size probing is not side-effect cached")
     require(errors, "RPCS3_IOS_CORE_BUFFER_TOO_SMALL" in implementations, "buffer-size contracts are missing")
@@ -218,10 +234,14 @@ def validate_link_graph(errors: list[str]) -> None:
         "IOSCoreMIDI.mm",
         "IOSCoreLibrary.mm",
         "IOSCoreInstaller.cpp",
+        "IOSCoreInstallationStatus.cpp",
     ):
         require(errors, source in extensions, f"core extension source is not linked: {source}")
 
     for contract in (
+        "rpcs3_ios_core_install_firmware_base",
+        "rpcs3_ios_core_install_package_base",
+        "rpcs3_ios_core_request_installation_cancel_base",
         "VERSION 0.4.0",
         "SOVERSION 0.4",
         "$<LINK_LIBRARY:WHOLE_ARCHIVE,rpcs3_emu>",
@@ -317,6 +337,7 @@ def validate_mobile_features(errors: list[str]) -> None:
     midi = read("rpcs3/ios/IOSCoreMIDI.mm")
     library = read("rpcs3/ios/IOSCoreLibrary.mm")
     installer = read("rpcs3/ios/IOSCoreInstaller.cpp")
+    installer_status = read("rpcs3/ios/IOSCoreInstallationStatus.cpp")
     core = read("rpcs3/ios/RPCS3Core.mm")
     consumer = read("rpcs3/ios/CoreLinkMain.mm")
 
@@ -378,6 +399,19 @@ def validate_mobile_features(errors: list[str]) -> None:
     ):
         require(errors, contract in installer, f"installer contract is missing: {contract}")
 
+    for contract in (
+        "begin_operation",
+        "progress_trampoline",
+        "finish_operation",
+        "rpcs3_ios_core_install_firmware_base",
+        "rpcs3_ios_core_install_package_base",
+        "rpcs3_ios_core_request_installation_cancel_base",
+        "rpcs3_ios_core_query_installation_status",
+        "rpcs3_ios_core_copy_installation_detail",
+        "g_status.cancel_requested = 1",
+    ):
+        require(errors, contract in installer_status, f"installer status contract is missing: {contract}")
+
     require(errors, "g_initialized.exchange(false)" in core, "shutdown does not close operation admission before drain")
     require(errors, "load_core_configuration" in core, "persistent settings are not loaded during core initialization")
     require(errors, "shutdown_core_installer" in core, "installer is not drained during core teardown")
@@ -431,7 +465,7 @@ def main() -> int:
             print(f"error: {error}", file=sys.stderr)
         return 1
 
-    print("RPCS3 iOS core 0.4 source/link/library/CoreMIDI contracts passed (no Apple build or execution performed).")
+    print("RPCS3 iOS core 0.4 source/link/library/CoreMIDI/installer-status contracts passed (no Apple build or execution performed).")
     return 0
 
 
