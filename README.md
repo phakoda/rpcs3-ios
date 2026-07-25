@@ -43,7 +43,7 @@ The experimental iOS/iPadOS workflow is documented in [BUILDING_IOS.md](BUILDING
 
 Check our friendly [quickstart](https://rpcs3.net/quickstart) guide to make sure your computer meets the minimum system requirements to run RPCS3.
 
-Don't forget to have your graphics driver up to date and to install the [Visual C++ Redistributable Packages for Visual 2022](https://aka.ms/vs/cpp)
+Don't forget to have your graphics driver up to date and to install the [Visual C++ Redistributable Packages for Visual Studio 2022](https://aka.ms/vs/17/release/vc_redist.x64.exe) if you are a Windows user.
 
 ## License
 
