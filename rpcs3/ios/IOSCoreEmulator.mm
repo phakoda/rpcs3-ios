@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -53,6 +54,7 @@ std::mutex g_event_mutex;
 std::mutex g_error_mutex;
 rpcs3_ios_core_event_callback g_event_callback = nullptr;
 void* g_event_context = nullptr;
+std::uint64_t g_event_generation = 0;
 std::string g_last_error;
 
 thread_local std::string g_boot_path;
@@ -96,23 +98,39 @@ void apply_core_runtime_settings()
     g_cfg.video.renderer = selected_core_renderer();
 }
 
+void clear_event_callback()
+{
+    std::lock_guard lock(g_event_mutex);
+    ++g_event_generation;
+    g_event_callback = nullptr;
+    g_event_context = nullptr;
+}
+
 void deliver_event(rpcs3_ios_core_event event, std::string detail = {})
 {
-    rpcs3_ios_core_event_callback callback = nullptr;
-    void* context = nullptr;
+    std::uint64_t generation = 0;
     {
         std::lock_guard lock(g_event_mutex);
-        callback = g_event_callback;
-        context = g_event_context;
-    }
-
-    if (!callback)
-    {
-        return;
+        if (!g_event_callback)
+        {
+            return;
+        }
+        generation = g_event_generation;
     }
 
     auto detail_storage = std::make_shared<std::string>(std::move(detail));
     const auto invoke = ^{
+        rpcs3_ios_core_event_callback callback = nullptr;
+        void* context = nullptr;
+        {
+            std::lock_guard lock(g_event_mutex);
+            if (generation != g_event_generation || !g_event_callback)
+            {
+                return;
+            }
+            callback = g_event_callback;
+            context = g_event_context;
+        }
         callback(event, detail_storage->c_str(), context);
     };
 
@@ -130,7 +148,19 @@ void call_on_main_thread(std::function<void()> function, atomic_t<u32>* wake_up)
 {
     auto task = std::make_shared<std::function<void()>>(std::move(function));
     const auto invoke = ^{
-        (*task)();
+        try
+        {
+            (*task)();
+        }
+        catch (const std::exception& exception)
+        {
+            rpcs3::ios::set_core_last_error(std::string("A main-thread emulator callback failed: ") + exception.what());
+        }
+        catch (...)
+        {
+            rpcs3::ios::set_core_last_error("A main-thread emulator callback failed with an unknown exception.");
+        }
+
         if (wake_up)
         {
             *wake_up = 1;
@@ -407,6 +437,16 @@ bool initialize_core_emulator(std::string* error)
         }
         return false;
     }
+    catch (...)
+    {
+        const std::string message = "Could not initialize the RPCS3 emulator core because an unknown exception occurred.";
+        set_core_last_error(message);
+        if (error)
+        {
+            *error = message;
+        }
+        return false;
+    }
 }
 
 void shutdown_core_emulator()
@@ -414,10 +454,12 @@ void shutdown_core_emulator()
     std::lock_guard lock(g_emulator_api_mutex);
     if (!g_core_emulator_initialized.exchange(false))
     {
+        clear_event_callback();
         return;
     }
 
     g_core_input_enabled = false;
+    clear_event_callback();
     try
     {
         if (Emulator::IsAvailable() && !Emu.IsStopped(true))
@@ -430,6 +472,10 @@ void shutdown_core_emulator()
     {
         set_core_last_error(std::string("Core shutdown failed: ") + exception.what());
     }
+    catch (...)
+    {
+        set_core_last_error("Core shutdown failed with an unknown exception.");
+    }
 }
 }
 
@@ -438,8 +484,9 @@ extern "C"
 void rpcs3_ios_core_set_event_callback(rpcs3_ios_core_event_callback callback, void* context)
 {
     std::lock_guard lock(g_event_mutex);
+    ++g_event_generation;
     g_event_callback = callback;
-    g_event_context = context;
+    g_event_context = callback ? context : nullptr;
 }
 
 rpcs3_ios_boot_result rpcs3_ios_core_boot_path(const char* path, uint8_t direct_boot)
@@ -476,6 +523,11 @@ rpcs3_ios_boot_result rpcs3_ios_core_boot_path(const char* path, uint8_t direct_
         rpcs3::ios::set_core_last_error(std::string("Boot failed: ") + exception.what());
         return RPCS3_IOS_BOOT_GENERIC_ERROR;
     }
+    catch (...)
+    {
+        rpcs3::ios::set_core_last_error("Boot failed with an unknown exception.");
+        return RPCS3_IOS_BOOT_GENERIC_ERROR;
+    }
 }
 
 rpcs3_ios_core_result rpcs3_ios_core_pause(void)
@@ -484,8 +536,28 @@ rpcs3_ios_core_result rpcs3_ios_core_pause(void)
     {
         return RPCS3_IOS_CORE_NOT_INITIALIZED;
     }
+
     std::lock_guard lock(g_emulator_api_mutex);
-    return Emu.IsRunning() && Emu.Pause(false, false) ? RPCS3_IOS_CORE_SUCCESS : RPCS3_IOS_CORE_BUSY;
+    try
+    {
+        if (!Emu.IsRunning() || !Emu.Pause(false, false))
+        {
+            rpcs3::ios::set_core_last_error("RPCS3 is not currently running or could not be paused.");
+            return RPCS3_IOS_CORE_BUSY;
+        }
+        rpcs3::ios::set_core_last_error({});
+        return RPCS3_IOS_CORE_SUCCESS;
+    }
+    catch (const std::exception& exception)
+    {
+        rpcs3::ios::set_core_last_error(std::string("Pause failed: ") + exception.what());
+        return RPCS3_IOS_CORE_PLATFORM_ERROR;
+    }
+    catch (...)
+    {
+        rpcs3::ios::set_core_last_error("Pause failed with an unknown exception.");
+        return RPCS3_IOS_CORE_PLATFORM_ERROR;
+    }
 }
 
 rpcs3_ios_core_result rpcs3_ios_core_resume(void)
@@ -494,13 +566,29 @@ rpcs3_ios_core_result rpcs3_ios_core_resume(void)
     {
         return RPCS3_IOS_CORE_NOT_INITIALIZED;
     }
+
     std::lock_guard lock(g_emulator_api_mutex);
-    if (!Emu.IsPaused())
+    try
     {
-        return RPCS3_IOS_CORE_BUSY;
+        if (!Emu.IsPaused())
+        {
+            rpcs3::ios::set_core_last_error("RPCS3 is not currently paused.");
+            return RPCS3_IOS_CORE_BUSY;
+        }
+        Emu.Resume();
+        rpcs3::ios::set_core_last_error({});
+        return RPCS3_IOS_CORE_SUCCESS;
     }
-    Emu.Resume();
-    return RPCS3_IOS_CORE_SUCCESS;
+    catch (const std::exception& exception)
+    {
+        rpcs3::ios::set_core_last_error(std::string("Resume failed: ") + exception.what());
+        return RPCS3_IOS_CORE_PLATFORM_ERROR;
+    }
+    catch (...)
+    {
+        rpcs3::ios::set_core_last_error("Resume failed with an unknown exception.");
+        return RPCS3_IOS_CORE_PLATFORM_ERROR;
+    }
 }
 
 rpcs3_ios_core_result rpcs3_ios_core_stop(void)
@@ -509,12 +597,27 @@ rpcs3_ios_core_result rpcs3_ios_core_stop(void)
     {
         return RPCS3_IOS_CORE_NOT_INITIALIZED;
     }
+
     std::lock_guard lock(g_emulator_api_mutex);
-    if (!Emu.IsStopped(true))
+    try
     {
-        Emu.Kill(false);
+        if (!Emu.IsStopped(true))
+        {
+            Emu.Kill(false);
+        }
+        rpcs3::ios::set_core_last_error({});
+        return RPCS3_IOS_CORE_SUCCESS;
     }
-    return RPCS3_IOS_CORE_SUCCESS;
+    catch (const std::exception& exception)
+    {
+        rpcs3::ios::set_core_last_error(std::string("Stop failed: ") + exception.what());
+        return RPCS3_IOS_CORE_PLATFORM_ERROR;
+    }
+    catch (...)
+    {
+        rpcs3::ios::set_core_last_error("Stop failed with an unknown exception.");
+        return RPCS3_IOS_CORE_PLATFORM_ERROR;
+    }
 }
 
 rpcs3_ios_boot_result rpcs3_ios_core_restart(void)
@@ -523,6 +626,7 @@ rpcs3_ios_boot_result rpcs3_ios_core_restart(void)
     {
         return RPCS3_IOS_BOOT_CORE_NOT_INITIALIZED;
     }
+
     std::lock_guard lock(g_emulator_api_mutex);
     try
     {
@@ -542,6 +646,11 @@ rpcs3_ios_boot_result rpcs3_ios_core_restart(void)
         rpcs3::ios::set_core_last_error(std::string("Restart failed: ") + exception.what());
         return RPCS3_IOS_BOOT_GENERIC_ERROR;
     }
+    catch (...)
+    {
+        rpcs3::ios::set_core_last_error("Restart failed with an unknown exception.");
+        return RPCS3_IOS_BOOT_GENERIC_ERROR;
+    }
 }
 
 rpcs3_ios_emulator_state rpcs3_ios_core_emulator_state(void)
@@ -550,24 +659,53 @@ rpcs3_ios_emulator_state rpcs3_ios_core_emulator_state(void)
     {
         return RPCS3_IOS_EMULATOR_UNAVAILABLE;
     }
-    return static_cast<rpcs3_ios_emulator_state>(Emu.GetStatus(false));
+
+    try
+    {
+        return static_cast<rpcs3_ios_emulator_state>(Emu.GetStatus(false));
+    }
+    catch (...)
+    {
+        return RPCS3_IOS_EMULATOR_UNAVAILABLE;
+    }
 }
 
 size_t rpcs3_ios_core_copy_boot_path(char* buffer, size_t buffer_size)
 {
-    g_boot_path = Emulator::IsAvailable() ? Emu.GetBoot() : std::string{};
+    try
+    {
+        g_boot_path = Emulator::IsAvailable() ? Emu.GetBoot() : std::string{};
+    }
+    catch (...)
+    {
+        g_boot_path.clear();
+    }
     return copy_string(g_boot_path, buffer, buffer_size);
 }
 
 size_t rpcs3_ios_core_copy_title(char* buffer, size_t buffer_size)
 {
-    g_title = Emulator::IsAvailable() ? Emu.GetTitle() : std::string{};
+    try
+    {
+        g_title = Emulator::IsAvailable() ? Emu.GetTitle() : std::string{};
+    }
+    catch (...)
+    {
+        g_title.clear();
+    }
     return copy_string(g_title, buffer, buffer_size);
 }
 
 size_t rpcs3_ios_core_copy_title_id(char* buffer, size_t buffer_size)
 {
-    g_title_id = Emulator::IsAvailable() ? Emu.GetTitleID() : std::string{};
+    try
+    {
+        g_title_id = Emulator::IsAvailable() ? Emu.GetTitleID() : std::string{};
+    }
+    catch (...)
+    {
+        g_title_id.clear();
+    }
     return copy_string(g_title_id, buffer, buffer_size);
 }
 }
