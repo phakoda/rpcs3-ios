@@ -2,9 +2,8 @@
 #
 # Desktop-only backends are represented by feature-disabled interface targets.
 # Required cross-built dependencies fail early with actionable paths instead of
-# accidentally linking macOS host libraries. Physical USB and MIDI input use
-# explicit no-device compatibility libraries so the emulator core retains a
-# complete compile and link graph while keeping emulated devices available.
+# accidentally linking macOS host libraries. Physical USB uses an explicit
+# no-device compatibility library; MIDI input uses the public CoreMIDI API.
 
 if(NOT RPCS3_IOS)
     message(FATAL_ERROR "3rdparty/ios.cmake is only valid for RPCS3 iOS builds")
@@ -94,6 +93,7 @@ find_library(RPCS3_IOS_COREFOUNDATION CoreFoundation REQUIRED)
 find_library(RPCS3_IOS_COREGRAPHICS CoreGraphics REQUIRED)
 find_library(RPCS3_IOS_COREHAPTICS CoreHaptics REQUIRED)
 find_library(RPCS3_IOS_COREMEDIA CoreMedia REQUIRED)
+find_library(RPCS3_IOS_COREMIDI CoreMIDI REQUIRED)
 find_library(RPCS3_IOS_COREMOTION CoreMotion REQUIRED)
 find_library(RPCS3_IOS_COREVIDEO CoreVideo REQUIRED)
 find_library(RPCS3_IOS_FOUNDATION Foundation REQUIRED)
@@ -124,6 +124,7 @@ target_link_libraries(3rdparty_ios_system INTERFACE
     "${RPCS3_IOS_COREGRAPHICS}"
     "${RPCS3_IOS_COREHAPTICS}"
     "${RPCS3_IOS_COREMEDIA}"
+    "${RPCS3_IOS_COREMIDI}"
     "${RPCS3_IOS_COREMOTION}"
     "${RPCS3_IOS_COREVIDEO}"
     "${RPCS3_IOS_FOUNDATION}"
@@ -147,8 +148,7 @@ if(RPCS3_IOS_SQLITE3)
 endif()
 target_link_options(3rdparty_ios_system INTERFACE "-ObjC")
 target_compile_definitions(3rdparty_ios_system INTERFACE
-    RPCS3_IOS_NO_USB_PASSTHROUGH=1
-    RPCS3_IOS_NO_MIDI_INPUT=1)
+    RPCS3_IOS_NO_USB_PASSTHROUGH=1)
 add_library(3rdparty::ios_system ALIAS 3rdparty_ios_system)
 
 # Vulkan through a user-provided MoltenVK distribution.
@@ -224,14 +224,15 @@ target_include_directories(3rdparty_libusb SYSTEM PUBLIC
     "${CMAKE_CURRENT_LIST_DIR}/ios/libusb/include")
 target_compile_definitions(3rdparty_libusb PUBLIC RPCS3_IOS_NO_USB_PASSTHROUGH=1)
 
-# MIDI adapter emulation remains compiled, but no host MIDI ports are exposed
-# until a native CoreMIDI bridge replaces this compatibility target.
+# Public CoreMIDI is available on iOS. This target implements the RtMidi C ABI
+# subset consumed by RPCS3's emulated Rock Band 3 MIDI adapters and exposes
+# currently connected CoreMIDI sources by their display names.
 add_library(3rdparty_rtmidi STATIC
-    "${CMAKE_CURRENT_LIST_DIR}/ios/rtmidi/rtmidi_stub.cpp")
+    "${CMAKE_CURRENT_LIST_DIR}/ios/rtmidi/rtmidi_coremidi.cpp")
 target_compile_features(3rdparty_rtmidi PUBLIC cxx_std_20)
 target_include_directories(3rdparty_rtmidi SYSTEM PUBLIC
     "${CMAKE_CURRENT_LIST_DIR}/ios/rtmidi/include")
-target_compile_definitions(3rdparty_rtmidi PUBLIC RPCS3_IOS_NO_MIDI_INPUT=1)
+target_link_libraries(3rdparty_rtmidi PUBLIC "${RPCS3_IOS_COREMIDI}")
 
 # Unsupported desktop/frontend integrations. These targets intentionally do
 # not define their HAVE_* feature macros.
