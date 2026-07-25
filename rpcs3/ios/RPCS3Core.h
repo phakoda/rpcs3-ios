@@ -23,6 +23,7 @@ typedef enum rpcs3_ios_core_result
     RPCS3_IOS_CORE_BUSY = 5,
     RPCS3_IOS_CORE_UNSUPPORTED = 6,
     RPCS3_IOS_CORE_BUFFER_TOO_SMALL = 7,
+    RPCS3_IOS_CORE_CANCELLED = 8,
 } rpcs3_ios_core_result;
 
 typedef enum rpcs3_ios_emulator_state
@@ -76,6 +77,57 @@ typedef enum rpcs3_ios_core_event
 
 typedef void (*rpcs3_ios_core_event_callback)(
     rpcs3_ios_core_event event,
+    const char* detail,
+    void* context);
+
+typedef enum rpcs3_ios_cpu_mode
+{
+    RPCS3_IOS_CPU_PORTABLE = 0,
+    RPCS3_IOS_CPU_PPU_LLVM = 1,
+    RPCS3_IOS_CPU_FULL_LLVM = 2,
+} rpcs3_ios_cpu_mode;
+
+typedef enum rpcs3_ios_frame_limit
+{
+    RPCS3_IOS_FRAME_LIMIT_AUTO = 0,
+    RPCS3_IOS_FRAME_LIMIT_30 = 1,
+    RPCS3_IOS_FRAME_LIMIT_60 = 2,
+    RPCS3_IOS_FRAME_LIMIT_120 = 3,
+    RPCS3_IOS_FRAME_LIMIT_DISPLAY = 4,
+} rpcs3_ios_frame_limit;
+
+typedef struct rpcs3_ios_configuration
+{
+    uint32_t struct_size;
+    uint32_t cpu_mode;
+    uint32_t audio_enabled;
+    uint32_t audio_volume;
+    uint32_t resolution_scale_percent;
+    uint32_t frame_limit;
+    uint32_t shader_cache_enabled;
+    uint32_t performance_overlay_enabled;
+    uint32_t preferred_spu_threads;
+} rpcs3_ios_configuration;
+
+typedef enum rpcs3_ios_installation_kind
+{
+    RPCS3_IOS_INSTALLATION_FIRMWARE = 0,
+    RPCS3_IOS_INSTALLATION_PACKAGE = 1,
+} rpcs3_ios_installation_kind;
+
+typedef enum rpcs3_ios_installation_stage
+{
+    RPCS3_IOS_INSTALLATION_VALIDATING = 0,
+    RPCS3_IOS_INSTALLATION_EXTRACTING = 1,
+    RPCS3_IOS_INSTALLATION_FINALIZING = 2,
+    RPCS3_IOS_INSTALLATION_COMPLETE = 3,
+} rpcs3_ios_installation_stage;
+
+typedef void (*rpcs3_ios_installation_progress_callback)(
+    rpcs3_ios_installation_kind kind,
+    rpcs3_ios_installation_stage stage,
+    uint32_t completed,
+    uint32_t total,
     const char* detail,
     void* context);
 
@@ -144,6 +196,53 @@ RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_stop(void);
 RPCS3_IOS_CORE_EXPORT rpcs3_ios_boot_result rpcs3_ios_core_restart(void);
 RPCS3_IOS_CORE_EXPORT rpcs3_ios_emulator_state rpcs3_ios_core_emulator_state(void);
 
+// Configuration is persistent in the framework host's NSUserDefaults domain.
+// Mutating calls are accepted only while emulation is fully stopped.
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_get_configuration(
+    rpcs3_ios_configuration* configuration);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_set_configuration(
+    const rpcs3_ios_configuration* configuration);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_reset_configuration(void);
+
+// Qt-free game-library management. The library stores title-ID/path mappings in
+// RPCS3's games.yml. Scans and mutations require stopped emulation.
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_add_game_directory(
+    const char* path,
+    uint32_t* added_games);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_add_game(const char* path);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_remove_game(const char* title_id);
+RPCS3_IOS_CORE_EXPORT size_t rpcs3_ios_core_game_count(void);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_copy_game(
+    size_t index,
+    char* title_id,
+    size_t title_id_size,
+    size_t* title_id_required,
+    char* path,
+    size_t path_size,
+    size_t* path_required);
+RPCS3_IOS_CORE_EXPORT size_t rpcs3_ios_core_game_directory_count(void);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_copy_game_directory(
+    size_t index,
+    char* path,
+    size_t path_size,
+    size_t* path_required);
+
+// Installers are synchronous and may perform substantial decryption and file
+// I/O. Invoke them on a serial background queue while emulation is stopped.
+// Progress callbacks run on the calling thread. Cancellation can be requested
+// from another thread; partially extracted files may remain after cancellation.
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_install_firmware(
+    const char* pup_path,
+    uint8_t allow_downgrade,
+    uint8_t overwrite_existing,
+    rpcs3_ios_installation_progress_callback callback,
+    void* context);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_install_package(
+    const char* package_path,
+    rpcs3_ios_installation_progress_callback callback,
+    void* context);
+RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_result rpcs3_ios_core_request_installation_cancel(void);
+
 RPCS3_IOS_CORE_EXPORT const char* rpcs3_ios_core_application_support_path(void);
 RPCS3_IOS_CORE_EXPORT const char* rpcs3_ios_core_caches_path(void);
 RPCS3_IOS_CORE_EXPORT const char* rpcs3_ios_core_documents_path(void);
@@ -162,6 +261,8 @@ RPCS3_IOS_CORE_EXPORT size_t rpcs3_ios_core_copy_last_error(char* buffer, size_t
 RPCS3_IOS_CORE_EXPORT size_t rpcs3_ios_core_copy_boot_path(char* buffer, size_t buffer_size);
 RPCS3_IOS_CORE_EXPORT size_t rpcs3_ios_core_copy_title(char* buffer, size_t buffer_size);
 RPCS3_IOS_CORE_EXPORT size_t rpcs3_ios_core_copy_title_id(char* buffer, size_t buffer_size);
+RPCS3_IOS_CORE_EXPORT size_t rpcs3_ios_core_copy_firmware_version(char* buffer, size_t buffer_size);
+RPCS3_IOS_CORE_EXPORT size_t rpcs3_ios_core_copy_last_installed_path(char* buffer, size_t buffer_size);
 
 // Configures public MoltenVK environment variables before Vulkan instance
 // creation. Safe to call before or after rpcs3_ios_core_initialize.
