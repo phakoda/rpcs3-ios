@@ -5,6 +5,8 @@
 #ifdef RPCS3_IOS_CORE
 #include "IOSCoreGSFrame.h"
 #include "Emu/System.h"
+
+extern atomic_t<bool> g_headless;
 #endif
 
 namespace rpcs3::ios
@@ -14,8 +16,9 @@ void apply_core_compatibility_defaults()
 #ifdef RPCS3_IOS_CORE
     // Upstream treats headless mode as Null-RSX-only. A framework host with a
     // live CAMetalLayer is a real GUI/render target even though it does not use
-    // Qt, so clear headless mode before RPCS3's settings fixup runs.
+    // Qt, so clear both RPCS3 headless state holders before settings fixup.
     const bool has_render_host = has_core_render_view();
+    g_headless = !has_render_host;
     if (Emulator::IsAvailable())
     {
         Emu.SetHeadless(!has_render_host);
