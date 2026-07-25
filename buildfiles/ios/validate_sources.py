@@ -43,6 +43,7 @@ REQUIRED_FILES = (
     "rpcs3/ios/IOSCoreLibrary.mm",
     "rpcs3/ios/IOSCoreInstaller.h",
     "rpcs3/ios/IOSCoreInstaller.cpp",
+    "rpcs3/ios/IOSCoreInstallationStatus.cpp",
     "rpcs3/ios/IOSBootstrapViewController.h",
     "rpcs3/ios/IOSBootstrapViewController.mm",
     "rpcs3/ios/IOSVulkanProbe.h",
@@ -232,6 +233,9 @@ def validate_cmake_contracts(root: Path, errors: list[str]) -> None:
         "IOSCoreMIDI.mm",
         "IOSCoreLibrary.mm",
         "IOSCoreInstaller.cpp",
+        "IOSCoreInstallationStatus.cpp",
+        "rpcs3_ios_core_install_firmware_base",
+        "rpcs3_ios_core_install_package_base",
         "VERSION 0.4.0",
         "SOVERSION 0.4",
     ):
