@@ -16,6 +16,7 @@ on:
       - 'rpcs3/rpcs3qt/CMakeLists.txt'
       - 'BUILDING_IOS.md'
       - 'PORTING_IOS.md'
+      - 'IOS_CORE_API.md'
   push:
     branches:
       - 'agent/ios-bootstrap'
@@ -33,6 +34,7 @@ on:
       - 'rpcs3/rpcs3qt/CMakeLists.txt'
       - 'BUILDING_IOS.md'
       - 'PORTING_IOS.md'
+      - 'IOS_CORE_API.md'
 
 permissions:
   contents: read
@@ -73,6 +75,15 @@ jobs:
           python3 buildfiles/ios/validate_core.py 2>&1 | tee validation-logs/core.log
           status=${PIPESTATUS[0]}
           echo "$status" > validation-logs/core.status
+          exit 0
+
+      - name: Validate native callback and management contracts
+        shell: bash
+        run: |
+          set +e
+          python3 buildfiles/ios/validate_callbacks.py 2>&1 | tee validation-logs/callbacks.log
+          status=${PIPESTATUS[0]}
+          echo "$status" > validation-logs/callbacks.status
           exit 0
 
       - name: Upload validator diagnostics
