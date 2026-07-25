@@ -249,13 +249,13 @@ rpcs3_ios_core_clear_all_midi_assignments();
 
 Mappings are serialized using RPCS3's existing three-slot MIDI configuration format and reapplied before every boot so a per-game configuration cannot silently erase them. Source names are name-based, matching upstream RPCS3 behavior; duplicate CoreMIDI display names can therefore be ambiguous. Assignment mutation requires stopped emulation.
 
-This is source-complete but not device-validated. CoreMIDI source discovery, connection, message timing, and actual emulated instrument input still require Apple-side evidence.
+This is source-integrated but not device-validated. CoreMIDI source discovery, connection, message timing, and actual emulated instrument input still require Apple-side evidence.
 
-## Firmware installation
+## Firmware and package installation
 
-The framework uses RPCS3's existing PUP parser, hash validation, SCE decrypter, TAR reader, and VFS destinations. It validates free storage, extracts `dev_flash_*` packages, and refreshes emulator VFS state.
+The firmware installer uses RPCS3's existing PUP parser, hash validation, SCE decrypter, TAR reader, free-storage checks, and VFS destinations. The package installer uses RPCS3's `package_reader`, decryption/extraction logic, progress reporting, and abort path.
 
-Run on a serial background queue:
+Run either synchronous operation on a serial background queue:
 
 ```objc
 dispatch_async(operationQueue, ^{
@@ -268,22 +268,6 @@ dispatch_async(operationQueue, ^{
 });
 ```
 
-The host must provide legally obtained PlayStation 3 firmware. The repository does not include firmware.
-
-Cancellation is cooperative between package boundaries:
-
-```c
-rpcs3_ios_core_request_installation_cancel();
-```
-
-A cancelled or failed installation may leave partially extracted files. The host should display this warning and allow the user to retry a known-good firmware package.
-
-Read the currently detected firmware version with `rpcs3_ios_core_copy_firmware_version()`.
-
-## PKG installation
-
-The package installer uses RPCS3's `package_reader`, decryption/extraction logic, progress reporting, and abort path:
-
 ```objc
 dispatch_async(operationQueue, ^{
     rpcs3_ios_core_result result = rpcs3_ios_core_install_package(
@@ -293,9 +277,48 @@ dispatch_async(operationQueue, ^{
 });
 ```
 
-The first bootable path returned by successful extraction is added to the normal game library. Retrieve it with `rpcs3_ios_core_copy_last_installed_path()`.
+The host must provide legally obtained content. The repository does not include firmware or packages.
 
-Installers are serialized inside the framework. A second concurrent operation returns `RPCS3_IOS_CORE_BUSY`.
+Cancellation is cooperative:
+
+```c
+rpcs3_ios_core_request_installation_cancel();
+```
+
+A cancelled or failed installation may leave partially extracted files. The first bootable path returned by successful PKG extraction is added to the normal game library and can be retrieved with `rpcs3_ios_core_copy_last_installed_path()`.
+
+### Installer status polling
+
+Progress callbacks are optional. Version 0.4 also records status independently so another thread or a callback-free host can poll the active operation:
+
+```c
+rpcs3_ios_installation_status status =
+    rpcs3_ios_core_query_installation_status();
+
+if (status.active)
+{
+    // status.kind, status.stage, status.completed, status.total
+}
+```
+
+`rpcs3_ios_installation_status` contains:
+
+- `struct_size` for ABI inspection;
+- `active`;
+- `cancel_requested`;
+- `kind` (`FIRMWARE` or `PACKAGE`);
+- `stage` (`VALIDATING`, `EXTRACTING`, `FINALIZING`, or `COMPLETE`);
+- `completed` and `total` work units.
+
+Retrieve the latest progress, cancellation, completion, or failure text with the standard two-call string convention:
+
+```c
+size_t required = rpcs3_ios_core_copy_installation_detail(NULL, 0);
+char* detail = malloc(required);
+rpcs3_ios_core_copy_installation_detail(detail, required);
+```
+
+Status is protected by a dedicated mutex. The original installers remain the owners of operation serialization, package-reader abort behavior, RPCS3 VFS mutation, and shutdown draining.
 
 ## Native guest interfaces
 
@@ -316,7 +339,9 @@ Use these APIs for support reports:
 
 - `rpcs3_ios_core_query_jit_status()`;
 - `rpcs3_ios_core_query_performance_status()`;
+- `rpcs3_ios_core_query_installation_status()`;
 - `rpcs3_ios_core_copy_jit_detail()`;
+- `rpcs3_ios_core_copy_installation_detail()`;
 - `rpcs3_ios_core_copy_diagnostics()`;
 - `rpcs3_ios_core_copy_last_error()`;
 - sandbox path accessors.
@@ -332,6 +357,7 @@ The UIKit management host writes diagnostics to a temporary text file and presen
 - Callback clearing is serialized with delivery on the main queue.
 - The framework retains the attached render view until it is cleared or shutdown completes.
 - Installation calls are synchronous and internally serialized.
+- Installer-status reads and cancellation requests may come from another thread.
 - Library-root, settings, and MIDI mutations require fully stopped emulation.
 - Shutdown closes admission, requests cancellation, and waits for the active installer to leave RPCS3 VFS/package state.
 
@@ -342,7 +368,7 @@ The source tree still requires Apple-side proof for:
 - Xcode generation and compilation;
 - final linking and module import;
 - framework loading and repeated initialization/shutdown;
-- firmware and PKG installation;
+- firmware and PKG installation plus status polling under real I/O;
 - CoreMIDI discovery, connection, packet delivery, and emulated instrument behavior;
 - interpreter and optional LLVM execution;
 - Vulkan/MoltenVK device creation and actual RSX frame presentation;
