@@ -42,6 +42,7 @@ def main() -> int:
     callback = read("rpcs3/ios/IOSCoreCallbacks.mm")
     composite = read("rpcs3/ios/IOSCoreCallbacksComposite.cpp")
     bounded_save = read("rpcs3/ios/IOSCoreSaveDialog.mm")
+    defaults = read("rpcs3/ios/IOSCoreDefaults.cpp")
     emulator = read("rpcs3/ios/IOSCoreEmulator.mm")
     guide = read("IOS_CORE_API.md")
 
@@ -86,6 +87,15 @@ def main() -> int:
         "save_entries" not in bounded_save.split("dispatch_async(dispatch_get_main_queue()", 1)[-1],
         "bounded save dialog captures RPCS3's caller-owned save entry vector across UIKit dispatch",
     )
+
+    for contract in (
+        "#ifdef RPCS3_IOS_CORE",
+        "const bool has_render_host = has_core_render_view()",
+        "Emu.SetHeadless(!has_render_host)",
+        "has_render_host ? video_renderer::vulkan : video_renderer::null",
+    ):
+        require(errors, contract in defaults, f"hosted Vulkan/headless contract is missing: {contract}")
+
     require(errors, "extend_core_callbacks(callbacks)" in emulator, "emulator callback table is not extended")
 
     for contract in (
