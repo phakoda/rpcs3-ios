@@ -9,7 +9,7 @@ endif()
 if(TARGET rpcs3_ios_core_framework)
     set(_rpcs3_ios_core_callbacks "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacks.mm")
     # Compile the broad UIKit/ImageIO callback layer under a private base name.
-    # IOSCoreCallbacksComposite.cpp then installs the bounded save chooser last.
+    # IOSCoreCallbacksComposite.cpp then installs contract-specific overrides.
     set_source_files_properties("${_rpcs3_ios_core_callbacks}" PROPERTIES
         COMPILE_DEFINITIONS "extend_core_callbacks=extend_core_callbacks_base")
 
@@ -17,6 +17,8 @@ if(TARGET rpcs3_ios_core_framework)
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacks.h"
         "${_rpcs3_ios_core_callbacks}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacksComposite.cpp"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreImageCallbacks.h"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreImageCallbacks.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreSaveDialog.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreSaveDialog.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreSettings.h"
