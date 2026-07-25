@@ -22,6 +22,7 @@ REQUIRED_FILES = (
     "rpcs3/ios/IOSCoreOpenURL.mm",
     "rpcs3/ios/IOSCoreSaveDialog.h",
     "rpcs3/ios/IOSCoreSaveDialog.mm",
+    "rpcs3/ios/PatchCoreHost.cmake",
 )
 
 
@@ -45,6 +46,7 @@ def main() -> int:
         return 1
 
     cmake = read("rpcs3/ios/CoreExtensions.cmake")
+    host_patch = read("rpcs3/ios/PatchCoreHost.cmake")
     callback = read("rpcs3/ios/IOSCoreCallbacks.mm")
     composite = read("rpcs3/ios/IOSCoreCallbacksComposite.cpp")
     event_wrapper = read("rpcs3/ios/IOSCoreEventCallback.mm")
@@ -62,12 +64,32 @@ def main() -> int:
         "IOSCoreEventCallback.mm",
         "IOSCoreFallbackCallbacks.mm",
         "IOSCoreImageCallbacks.mm",
-        "IOSCoreOpenURL.mm",
         "IOSCoreSaveDialog.mm",
         "extend_core_callbacks=extend_core_callbacks_base",
         "rpcs3_ios_core_set_event_callback=rpcs3_ios_core_set_event_callback_base",
+        "PatchCoreHost.cmake",
     ):
         require(errors, contract in cmake, f"callback or host composition build contract is missing: {contract}")
+
+    for contract in (
+        "CoreLinkMainSafe.mm",
+        "IOSCoreOpenURL.mm",
+        "@interface RPCS3CoreLinkViewController ()",
+        "const std::string path_copy = path;",
+        "INSTALLATION_FIRMWARE path:path_copy",
+        "INSTALLATION_PACKAGE path:path_copy",
+        "removeDirectory:path_copy removeEntries:NO",
+        "removeDirectory:path_copy removeEntries:YES",
+        "list(FILTER _core_host_sources EXCLUDE REGEX",
+        "Could not apply the iOS core management-host lifetime adaptation",
+    ):
+        require(errors, contract in host_patch, f"generated management-host hardening is missing: {contract}")
+
+    require(
+        errors,
+        host_patch.count("const std::string path_copy = path;") >= 4,
+        "management-host patch does not define and validate all explicit path copies",
+    )
 
     for contract in (
         "class ios_msg_dialog",
@@ -182,7 +204,7 @@ def main() -> int:
             print(f"error: {error}", file=sys.stderr)
         return 1
 
-    print("RPCS3 iOS native callback/fallback/open-in-place contracts passed (no Apple execution performed).")
+    print("RPCS3 iOS native callback/fallback/open-in-place/host-lifetime contracts passed (no Apple execution performed).")
     return 0
 
 
