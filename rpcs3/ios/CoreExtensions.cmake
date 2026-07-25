@@ -9,14 +9,18 @@ endif()
 if(TARGET rpcs3_ios_core_framework)
     set(_rpcs3_ios_core_callbacks "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacks.mm")
     set(_rpcs3_ios_core_emulator "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreEmulator.mm")
+    set(_rpcs3_ios_core_installer "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstaller.cpp")
 
     # Compile broad implementations under private base names. Small composition
     # units then install contract-specific behavior without rewriting the larger
-    # emulator and UIKit callback translation units.
+    # emulator, installer, and UIKit callback translation units.
     set_source_files_properties("${_rpcs3_ios_core_callbacks}" PROPERTIES
         COMPILE_DEFINITIONS "extend_core_callbacks=extend_core_callbacks_base")
     set_source_files_properties("${_rpcs3_ios_core_emulator}" PROPERTIES
         COMPILE_DEFINITIONS "rpcs3_ios_core_set_event_callback=rpcs3_ios_core_set_event_callback_base")
+    set_source_files_properties("${_rpcs3_ios_core_installer}" PROPERTIES
+        COMPILE_DEFINITIONS
+            "rpcs3_ios_core_install_firmware=rpcs3_ios_core_install_firmware_base;rpcs3_ios_core_install_package=rpcs3_ios_core_install_package_base;rpcs3_ios_core_request_installation_cancel=rpcs3_ios_core_request_installation_cancel_base")
 
     target_sources(rpcs3_ios_core_framework PRIVATE
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacks.h"
@@ -33,7 +37,8 @@ if(TARGET rpcs3_ios_core_framework)
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreMIDI.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreLibrary.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstaller.h"
-        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstaller.cpp")
+        "${_rpcs3_ios_core_installer}"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstallationStatus.cpp")
 
     # PatchCoreSources creates the framework target. Keep the public ABI version
     # override next to the extension modules that define the 0.4 surface.
