@@ -91,8 +91,8 @@ rpcs3_ios_core_result fail_initialization(std::string error)
 
 extern "C"
 {
-double RPCS3CoreVersionNumber = 0.3;
-const unsigned char RPCS3CoreVersionString[] = "RPCS3Core 0.3";
+double RPCS3CoreVersionNumber = 0.4;
+const unsigned char RPCS3CoreVersionString[] = "RPCS3Core 0.4";
 
 rpcs3_ios_core_result rpcs3_ios_core_initialize(void)
 {
@@ -183,6 +183,9 @@ rpcs3_ios_core_result rpcs3_ios_core_set_render_view(void* native_view)
         return RPCS3_IOS_CORE_INVALID_ARGUMENT;
     }
 
+    // Keep both RPCS3 headless state holders and the configured renderer in
+    // sync immediately rather than waiting until the next boot request.
+    rpcs3::ios::apply_core_compatibility_defaults();
     rpcs3::ios::set_core_last_error({});
     return RPCS3_IOS_CORE_SUCCESS;
 }
@@ -196,6 +199,7 @@ rpcs3_ios_core_result rpcs3_ios_core_clear_render_view(void)
     }
 
     rpcs3::ios::clear_core_render_view();
+    rpcs3::ios::apply_core_compatibility_defaults();
     rpcs3::ios::set_core_last_error({});
     return RPCS3_IOS_CORE_SUCCESS;
 }
