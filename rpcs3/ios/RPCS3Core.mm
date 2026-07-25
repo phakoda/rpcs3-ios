@@ -2,7 +2,9 @@
 #include "IOSCoreDefaults.h"
 #include "IOSCoreEmulator.h"
 #include "IOSCoreGSFrame.h"
+#include "IOSCoreInstaller.h"
 #include "IOSCoreLifecycle.h"
+#include "IOSCoreSettings.h"
 #include "platform/IOSPlatform.h"
 
 #include <algorithm>
@@ -74,6 +76,7 @@ bool renderer_mutation_allowed()
 rpcs3_ios_core_result fail_initialization(std::string error)
 {
     clear_pending_import();
+    rpcs3::ios::shutdown_core_installer();
     rpcs3::ios::remove_core_lifecycle_callbacks();
     rpcs3::ios::shutdown_core_emulator();
     rpcs3::ios::clear_core_render_view();
@@ -88,8 +91,8 @@ rpcs3_ios_core_result fail_initialization(std::string error)
 
 extern "C"
 {
-double RPCS3CoreVersionNumber = 0.2;
-const unsigned char RPCS3CoreVersionString[] = "RPCS3Core 0.2";
+double RPCS3CoreVersionNumber = 0.3;
+const unsigned char RPCS3CoreVersionString[] = "RPCS3Core 0.3";
 
 rpcs3_ios_core_result rpcs3_ios_core_initialize(void)
 {
@@ -102,6 +105,7 @@ rpcs3_ios_core_result rpcs3_ios_core_initialize(void)
     rpcs3::ios::configure_moltenvk({});
     rpcs3::ios::initialize();
     rpcs3::ios::apply_core_compatibility_defaults();
+    rpcs3::ios::load_core_configuration();
 
     std::string error;
     if (!rpcs3::ios::prepare_runtime_directories(&error))
@@ -138,8 +142,9 @@ rpcs3_ios_core_result rpcs3_ios_core_shutdown(void)
         return RPCS3_IOS_CORE_NOT_INITIALIZED;
     }
 
-    // Stop lifecycle delivery and guest/renderer threads before releasing their
-    // retained UIView, controller overlay, audio, display, and notifications.
+    // Cancel and drain framework-owned file operations before stopping guest,
+    // renderer, controller, display, audio, and notification services.
+    rpcs3::ios::shutdown_core_installer();
     rpcs3::ios::remove_core_lifecycle_callbacks();
     rpcs3::ios::shutdown_core_emulator();
     rpcs3::ios::clear_core_render_view();
