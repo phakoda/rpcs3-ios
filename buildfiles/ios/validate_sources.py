@@ -17,7 +17,10 @@ from pathlib import Path
 REQUIRED_FILES = (
     "BUILDING_IOS.md",
     "PORTING_IOS.md",
+    "IOS_CORE_API.md",
     "3rdparty/ios.cmake",
+    "3rdparty/ios/rtmidi/include/rtmidi_c.h",
+    "3rdparty/ios/rtmidi/rtmidi_coremidi.cpp",
     "buildfiles/cmake/ConfigureIOS.cmake",
     "buildfiles/ios/configure.sh",
     "buildfiles/ios/build_ffmpeg.sh",
@@ -26,6 +29,7 @@ REQUIRED_FILES = (
     "buildfiles/ios/validate_environment.sh",
     "buildfiles/ios/validate_sources.py",
     "buildfiles/ios/validate_core.py",
+    "buildfiles/ios/validate_callbacks.py",
     "buildfiles/ios/archive.sh",
     "buildfiles/ios/deploy.sh",
     "buildfiles/ios/report_signing.sh",
@@ -34,7 +38,9 @@ REQUIRED_FILES = (
     "rpcs3/ios/CoreExtensions.cmake",
     "rpcs3/ios/IOSCoreSettings.h",
     "rpcs3/ios/IOSCoreSettings.mm",
-    "rpcs3/ios/IOSCoreLibrary.cpp",
+    "rpcs3/ios/IOSCoreMIDI.h",
+    "rpcs3/ios/IOSCoreMIDI.mm",
+    "rpcs3/ios/IOSCoreLibrary.mm",
     "rpcs3/ios/IOSCoreInstaller.h",
     "rpcs3/ios/IOSCoreInstaller.cpp",
     "rpcs3/ios/IOSBootstrapViewController.h",
@@ -56,6 +62,13 @@ REQUIRED_FILES = (
     "rpcs3/ios/platform/IOSVirtualController.cpp",
     "rpcs3/Input/ios_gamecontroller_pad_handler.h",
     "rpcs3/Input/ios_gamecontroller_pad_handler.cpp",
+)
+
+OBSOLETE_FILES = (
+    "3rdparty/ios/rtmidi/rtmidi_stub.cpp",
+    "rpcs3/ios/IOSCoreLibrary.cpp",
+    "rpcs3/ios/IOSHeadlessCore.h",
+    "rpcs3/ios/IOSHeadlessCore.cpp",
 )
 
 PLISTS = (
@@ -134,13 +147,20 @@ def fail(errors: list[str], message: str) -> None:
     errors.append(message)
 
 
+def require(errors: list[str], condition: bool, message: str) -> None:
+    if not condition:
+        fail(errors, message)
+
+
 def validate_required_files(root: Path, errors: list[str]) -> None:
     for relative in REQUIRED_FILES:
-        if not (root / relative).is_file():
-            fail(errors, f"missing required iOS source: {relative}")
+        require(errors, (root / relative).is_file(), f"missing required iOS source: {relative}")
+    for relative in OBSOLETE_FILES:
+        require(errors, not (root / relative).exists(), f"obsolete iOS source must remain removed: {relative}")
 
 
 def validate_plists(root: Path, errors: list[str]) -> None:
+    parsed: dict[str, dict] = {}
     for relative in PLISTS:
         path = root / relative
         try:
@@ -149,45 +169,40 @@ def validate_plists(root: Path, errors: list[str]) -> None:
         except (OSError, plistlib.InvalidFileException) as error:
             fail(errors, f"invalid plist {relative}: {error}")
             continue
-
         if not isinstance(value, dict):
             fail(errors, f"plist root is not a dictionary: {relative}")
             continue
-
+        parsed[relative] = value
         forbidden = FORBIDDEN_ENTITLEMENTS.intersection(value)
-        if forbidden:
-            fail(errors, f"forbidden private entitlement(s) in {relative}: {sorted(forbidden)}")
+        require(errors, not forbidden, f"forbidden private entitlement(s) in {relative}: {sorted(forbidden)}")
 
-    info_path = root / "rpcs3/ios/Info.plist.in"
-    if info_path.is_file():
-        with info_path.open("rb") as stream:
-            info = plistlib.load(stream)
-        for key in (
-            "CFBundleIdentifier",
-            "CFBundleExecutable",
-            "UISupportedInterfaceOrientations",
-            "GCSupportsControllerUserInteraction",
-            "LSApplicationQueriesSchemes",
-            "NSLocalNetworkUsageDescription",
-        ):
-            if key not in info:
-                fail(errors, f"Info.plist is missing {key}")
+    info = parsed.get("rpcs3/ios/Info.plist.in", {})
+    for key in (
+        "CFBundleIdentifier",
+        "CFBundleExecutable",
+        "UISupportedInterfaceOrientations",
+        "GCSupportsControllerUserInteraction",
+        "LSApplicationQueriesSchemes",
+        "NSLocalNetworkUsageDescription",
+    ):
+        require(errors, key in info, f"Info.plist is missing {key}")
 
-        schemes = set(info.get("LSApplicationQueriesSchemes", []))
-        for scheme in ("apple-magnifier", "stikjit"):
-            if scheme not in schemes:
-                fail(errors, f"Info.plist is missing the public JIT provider scheme {scheme!r}")
+    schemes = set(info.get("LSApplicationQueriesSchemes", []))
+    for scheme in ("apple-magnifier", "stikjit"):
+        require(errors, scheme in schemes, f"Info.plist is missing public JIT provider scheme {scheme!r}")
+
+    framework = parsed.get("rpcs3/ios/RPCS3Core-Info.plist.in", {})
+    require(errors, framework.get("CFBundleShortVersionString") == "0.4", "RPCS3Core plist short version is not 0.4")
+    require(errors, framework.get("CFBundleVersion") == "4", "RPCS3Core plist bundle version is not 4")
 
 
 def validate_shell_scripts(root: Path, errors: list[str]) -> None:
     for relative in SHELL_SCRIPTS:
         text = (root / relative).read_text(encoding="utf-8")
-        if not text.startswith("#!/usr/bin/env bash\n"):
-            fail(errors, f"shell helper lacks the expected Bash shebang: {relative}")
-        if "set -euo pipefail" not in text:
-            fail(errors, f"shell helper lacks strict mode: {relative}")
-        if "mapfile" in text or "readarray" in text:
-            fail(errors, f"shell helper uses a Bash feature absent from macOS system Bash: {relative}")
+        require(errors, text.startswith("#!/usr/bin/env bash\n"), f"shell helper lacks expected Bash shebang: {relative}")
+        require(errors, "set -euo pipefail" in text, f"shell helper lacks strict mode: {relative}")
+        require(errors, "mapfile" not in text and "readarray" not in text,
+                f"shell helper uses Bash feature absent from macOS system Bash: {relative}")
 
 
 def validate_patch_anchors(root: Path, errors: list[str]) -> None:
@@ -198,8 +213,7 @@ def validate_patch_anchors(root: Path, errors: list[str]) -> None:
             continue
         text = path.read_text(encoding="utf-8")
         for anchor in anchors:
-            if anchor not in text:
-                fail(errors, f"generated-source anchor moved in {relative}: {anchor!r}")
+            require(errors, anchor in text, f"generated-source anchor moved in {relative}: {anchor!r}")
 
 
 def validate_cmake_contracts(root: Path, errors: list[str]) -> None:
@@ -210,13 +224,18 @@ def validate_cmake_contracts(root: Path, errors: list[str]) -> None:
         "PatchCoreSources.cmake",
         "CoreExtensions.cmake",
     ):
-        if contract not in root_cmake:
-            fail(errors, f"root CMake contract missing: {contract}")
+        require(errors, contract in root_cmake, f"root CMake contract missing: {contract}")
 
     extensions = (root / "rpcs3/ios/CoreExtensions.cmake").read_text(encoding="utf-8")
-    for contract in ("IOSCoreSettings.mm", "IOSCoreLibrary.cpp", "IOSCoreInstaller.cpp"):
-        if contract not in extensions:
-            fail(errors, f"core extension build contract missing: {contract}")
+    for contract in (
+        "IOSCoreSettings.mm",
+        "IOSCoreMIDI.mm",
+        "IOSCoreLibrary.mm",
+        "IOSCoreInstaller.cpp",
+        "VERSION 0.4.0",
+        "SOVERSION 0.4",
+    ):
+        require(errors, contract in extensions, f"core extension build contract missing: {contract}")
 
     configure = (root / "buildfiles/cmake/ConfigureIOS.cmake").read_text(encoding="utf-8")
     for option in (
@@ -225,8 +244,7 @@ def validate_cmake_contracts(root: Path, errors: list[str]) -> None:
         "RPCS3_IOS_LLVM_ROOT",
         "RPCS3_IOS_ENTITLEMENTS_FILE",
     ):
-        if option not in configure:
-            fail(errors, f"iOS CMake option missing: {option}")
+        require(errors, option in configure, f"iOS CMake option missing: {option}")
 
     dependencies = (root / "3rdparty/ios.cmake").read_text(encoding="utf-8")
     for contract in (
@@ -234,9 +252,11 @@ def validate_cmake_contracts(root: Path, errors: list[str]) -> None:
         "RPCS3_IOS_FFMPEG_ROOT",
         "3rdparty::vulkan",
         "3rdparty::ffmpeg",
+        "RPCS3_IOS_COREMIDI",
+        "rtmidi_coremidi.cpp",
     ):
-        if contract not in dependencies:
-            fail(errors, f"iOS dependency contract missing: {contract}")
+        require(errors, contract in dependencies, f"iOS dependency contract missing: {contract}")
+    require(errors, "RPCS3_IOS_NO_MIDI_INPUT" not in dependencies, "CoreMIDI build still declares MIDI unavailable")
 
     platform_cmake = (root / "rpcs3/ios/platform/CMakeLists.txt").read_text(encoding="utf-8")
     for contract in (
@@ -249,23 +269,20 @@ def validate_cmake_contracts(root: Path, errors: list[str]) -> None:
         "CoreHaptics",
         "CoreMotion",
     ):
-        if contract not in platform_cmake:
-            fail(errors, f"iOS platform build contract missing: {contract}")
+        require(errors, contract in platform_cmake, f"iOS platform build contract missing: {contract}")
 
     bootstrap_cmake = (root / "rpcs3/ios/CMakeLists.txt").read_text(encoding="utf-8")
     for contract in ("IOSBootstrapViewController.mm", "IOSVulkanProbe.mm"):
-        if contract not in bootstrap_cmake:
-            fail(errors, f"bootstrap build contract missing: {contract}")
+        require(errors, contract in bootstrap_cmake, f"bootstrap build contract missing: {contract}")
 
     llvm_builder = (root / "buildfiles/ios/build_llvm.sh").read_text(encoding="utf-8")
     for contract in ("llvm-tblgen", "LLVM_TABLEGEN", "LLVMConfig.cmake", "CMAKE_SYSTEM_NAME=iOS"):
-        if contract not in llvm_builder:
-            fail(errors, f"LLVM cross-build contract missing: {contract}")
+        require(errors, contract in llvm_builder, f"LLVM cross-build contract missing: {contract}")
 
 
 def validate_platform_contracts(root: Path, errors: list[str]) -> None:
     platform = (root / "rpcs3/ios/platform/IOSPlatform.h").read_text(encoding="utf-8")
-    required_apis = (
+    for api in (
         "allocate_jit_memory",
         "publish_jit_memory",
         "query_extended_jit_capabilities",
@@ -277,46 +294,28 @@ def validate_platform_contracts(root: Path, errors: list[str]) -> None:
         "get_external_display_state",
         "configure_moltenvk",
         "write_diagnostics_report",
-    )
-    for api in required_apis:
-        if api not in platform:
-            fail(errors, f"expanded iOS platform API missing: {api}")
+    ):
+        require(errors, api in platform, f"expanded iOS platform API missing: {api}")
 
     jit = (root / "rpcs3/ios/platform/IOSJIT.mm").read_text(encoding="utf-8")
     for contract in ("mach_vm_remap", "sys_icache_invalidate", "pthread_jit_write_protect_np"):
-        if contract not in jit:
-            fail(errors, f"JIT memory contract missing: {contract}")
+        require(errors, contract in jit, f"JIT memory contract missing: {contract}")
 
     provider = (root / "rpcs3/ios/platform/IOSJITProvider.mm").read_text(encoding="utf-8")
-    for contract in (
-        "apple-magnifier://",
-        "stikjit://enable-jit",
-        "[fd00::]:9172/attach",
-        "wait_for_jit_enablement",
-    ):
-        if contract not in provider:
-            fail(errors, f"external JIT provider contract missing: {contract}")
+    for contract in ("apple-magnifier://", "stikjit://enable-jit", "[fd00::]:9172/attach", "wait_for_jit_enablement"):
+        require(errors, contract in provider, f"external JIT provider contract missing: {contract}")
 
     controller = (root / "rpcs3/ios/platform/IOSControllerFeatures.mm").read_text(encoding="utf-8")
-    for contract in (
-        "CoreMotion",
-        "CoreHaptics",
-        "GCHapticsLocalityAll",
-        "deviceMotion",
-        "normalize_hardware_controller_slots",
-    ):
-        if contract not in controller:
-            fail(errors, f"controller feature contract missing: {contract}")
+    for contract in ("CoreMotion", "CoreHaptics", "GCHapticsLocalityAll", "deviceMotion", "normalize_hardware_controller_slots"):
+        require(errors, contract in controller, f"controller feature contract missing: {contract}")
 
     controller_light = (root / "rpcs3/ios/platform/IOSControllerLight.mm").read_text(encoding="utf-8")
     for contract in ("GCDeviceLight", "GCColor", "set_hardware_controller_light"):
-        if contract not in controller_light:
-            fail(errors, f"controller light contract missing: {contract}")
+        require(errors, contract in controller_light, f"controller light contract missing: {contract}")
 
     moltenvk = (root / "rpcs3/ios/platform/IOSMoltenVK.mm").read_text(encoding="utf-8")
     for forbidden in FORBIDDEN_PRIVATE_MOLTENVK_FLAGS:
-        if forbidden in moltenvk:
-            fail(errors, f"private or debug-only MoltenVK/Metal flag added: {forbidden}")
+        require(errors, forbidden not in moltenvk, f"private or debug-only MoltenVK/Metal flag added: {forbidden}")
 
     ios_sources = "\n".join(
         path.read_text(encoding="utf-8", errors="ignore")
@@ -324,18 +323,11 @@ def validate_platform_contracts(root: Path, errors: list[str]) -> None:
         if path.is_file()
     )
     for forbidden in FORBIDDEN_PRIVATE_APIS:
-        if forbidden in ios_sources:
-            fail(errors, f"private Apple API or entitlement marker added to iOS sources: {forbidden}")
+        require(errors, forbidden not in ios_sources, f"private Apple API or entitlement marker added: {forbidden}")
 
     patch = (root / "rpcs3/ios/PatchCoreSources.cmake").read_text(encoding="utf-8")
-    for contract in (
-        "if(TARGET rpcs3_emu)",
-        "if(TARGET rpcs3_ui)",
-        "set_jit_write_protection",
-        "__builtin___clear_cache",
-    ):
-        if contract not in patch:
-            fail(errors, f"generated iOS core adaptation missing: {contract}")
+    for contract in ("if(TARGET rpcs3_emu)", "if(TARGET rpcs3_ui)", "set_jit_write_protection", "__builtin___clear_cache"):
+        require(errors, contract in patch, f"generated iOS core adaptation missing: {contract}")
 
 
 def validate_controller_contract(root: Path, errors: list[str]) -> None:
@@ -344,7 +336,7 @@ def validate_controller_contract(root: Path, errors: list[str]) -> None:
     handler = (root / "rpcs3/Input/ios_gamecontroller_pad_handler.cpp").read_text(encoding="utf-8")
     platform = (root / "rpcs3/ios/platform/IOSPlatform.h").read_text(encoding="utf-8")
 
-    checks = (
+    for needle, haystack, description in (
         ("ios_gamecontroller", enum_header, "handler enum"),
         ("iOS GameController", enum_source, "handler serialization"),
         ("get_combined_controller_state", handler, "handler state source"),
@@ -354,18 +346,15 @@ def validate_controller_contract(root: Path, errors: list[str]) -> None:
         ("get_battery_level", handler, "battery integration"),
         ("colorR.get()", handler, "RGB configuration integration"),
         ("attach_touch_controller_overlay", platform, "touch overlay API"),
-    )
-    for needle, haystack, description in checks:
-        if needle not in haystack:
-            fail(errors, f"missing {description}: {needle}")
+    ):
+        require(errors, needle in haystack, f"missing {description}: {needle}")
 
 
 def validate_no_claims_of_completion(root: Path, errors: list[str]) -> None:
     text = (root / "PORTING_IOS.md").read_text(encoding="utf-8").lower()
-    suspicious = re.compile(r"\b(fully working|port complete|all games work|production ready)\b")
-    match = suspicious.search(text)
-    if match:
-        fail(errors, f"PORTING_IOS.md makes an unsupported completion claim: {match.group(0)!r}")
+    match = re.search(r"\b(fully working|port complete|all games work|production ready)\b", text)
+    require(errors, match is None,
+            f"PORTING_IOS.md makes an unsupported completion claim: {match.group(0)!r}" if match else "")
 
 
 def main() -> int:
@@ -386,10 +375,11 @@ def main() -> int:
 
     if errors:
         for error in errors:
-            print(f"error: {error}", file=sys.stderr)
+            if error:
+                print(f"error: {error}", file=sys.stderr)
         return 1
 
-    print("iOS source validation passed (host-independent checks only).")
+    print("iOS 0.4 source validation passed (host-independent checks only).")
     return 0
 
 
