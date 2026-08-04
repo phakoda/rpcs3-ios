@@ -79,6 +79,7 @@ if(TARGET rpcs3_ios_core_framework)
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstaller.h"
         "${_rpcs3_ios_core_installer}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstallerTransaction.cpp"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstallerRecovery.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstallationStatus.cpp")
 
     # PatchCoreSources creates the framework target. Keep the public ABI version
