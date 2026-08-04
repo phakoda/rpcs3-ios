@@ -112,6 +112,7 @@ const char* core_operation_name(core_operation operation) noexcept
     case core_operation::settings: return "settings mutation";
     case core_operation::midi: return "MIDI mutation";
     case core_operation::render_host: return "render-host mutation";
+    case core_operation::import_item: return "security-scoped import";
     }
     return "unknown operation";
 }
