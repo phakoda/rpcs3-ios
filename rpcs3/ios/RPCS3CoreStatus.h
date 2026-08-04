@@ -71,6 +71,7 @@ typedef struct rpcs3_ios_core_capabilities
 RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_operation_status rpcs3_ios_core_query_operation_status(void);
 RPCS3_IOS_CORE_EXPORT rpcs3_ios_installation_status_v2 rpcs3_ios_core_query_installation_status_v2(void);
 RPCS3_IOS_CORE_EXPORT rpcs3_ios_core_capabilities rpcs3_ios_core_query_capabilities(void);
+RPCS3_IOS_CORE_EXPORT uint64_t rpcs3_ios_core_midi_topology_generation(void);
 
 #if defined(__cplusplus)
 }
