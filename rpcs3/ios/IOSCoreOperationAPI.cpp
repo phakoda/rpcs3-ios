@@ -1,4 +1,5 @@
 #include "IOSCoreEmulator.h"
+#include "IOSCoreFallbackCallbacks.h"
 #include "IOSCoreLifecycle.h"
 #include "IOSCoreOperations.h"
 #include "RPCS3Core.h"
@@ -64,7 +65,11 @@ rpcs3_ios_core_result rpcs3_ios_core_shutdown(void)
     return run_core_operation(
         rpcs3::ios::core_operation::shutdown,
         RPCS3_IOS_CORE_BUSY,
-        [] { return rpcs3_ios_core_shutdown_base(); });
+        []
+        {
+            rpcs3::ios::shutdown_core_fallback_services();
+            return rpcs3_ios_core_shutdown_base();
+        });
 }
 
 rpcs3_ios_core_result rpcs3_ios_core_set_render_view(void* native_view)
