@@ -1,5 +1,6 @@
 framework module RPCS3Core {
-    umbrella header "RPCS3Core.h"
+    header "RPCS3Core.h"
+    header "RPCS3CoreStatus.h"
     export *
     module * { export * }
 }
