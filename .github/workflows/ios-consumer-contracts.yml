@@ -1,0 +1,63 @@
+name: iOS consumer contracts
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ios-consumer-contracts.yml'
+      - 'buildfiles/ios/contracts/**'
+      - 'buildfiles/ios/verify_framework_consumers.sh'
+      - 'IOS_FRAMEWORK_CONSUMER.md'
+      - 'rpcs3/ios/RPCS3Core.h'
+      - 'rpcs3/ios/RPCS3CoreStatus.h'
+      - 'rpcs3/ios/RPCS3Core.modulemap'
+  push:
+    branches:
+      - 'agent/ios-bootstrap'
+    paths:
+      - '.github/workflows/ios-consumer-contracts.yml'
+      - 'buildfiles/ios/contracts/**'
+      - 'buildfiles/ios/verify_framework_consumers.sh'
+      - 'IOS_FRAMEWORK_CONSUMER.md'
+      - 'rpcs3/ios/RPCS3Core.h'
+      - 'rpcs3/ios/RPCS3CoreStatus.h'
+      - 'rpcs3/ios/RPCS3Core.modulemap'
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Validate verifier shell syntax
+        shell: bash
+        run: bash -n buildfiles/ios/verify_framework_consumers.sh
+      - name: Syntax-check C, C++, and Objective-C++ consumers
+        shell: bash
+        run: |
+          SDKROOT="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          TARGET=arm64-apple-ios16.0-simulator
+          xcrun --sdk iphonesimulator clang \
+            -std=c17 -Wall -Wextra -Werror \
+            -target "${TARGET}" -isysroot "${SDKROOT}" \
+            -Irpcs3/ios -fsyntax-only \
+            buildfiles/ios/contracts/core_consumer.c
+          xcrun --sdk iphonesimulator clang++ \
+            -std=c++20 -Wall -Wextra -Werror \
+            -target "${TARGET}" -isysroot "${SDKROOT}" \
+            -Irpcs3/ios -fsyntax-only \
+            buildfiles/ios/contracts/core_consumer.cpp
+          xcrun --sdk iphonesimulator clang++ \
+            -std=c++20 -fobjc-arc -fblocks -Wall -Wextra -Werror \
+            -target "${TARGET}" -isysroot "${SDKROOT}" \
+            -Irpcs3/ios -fsyntax-only \
+            buildfiles/ios/contracts/core_consumer.mm
+      - name: Check Swift contract source
+        shell: bash
+        run: |
+          grep -Fq 'import RPCS3Core' buildfiles/ios/contracts/CoreConsumer.swift
+          grep -Fq 'rpcs3_ios_core_query_capabilities' buildfiles/ios/contracts/CoreConsumer.swift
+          grep -Fq 'rpcs3_ios_core_query_operation_status' buildfiles/ios/contracts/CoreConsumer.swift
