@@ -23,6 +23,8 @@ if(TARGET rpcs3_ios_core_framework)
             "rpcs3_ios_core_install_firmware=rpcs3_ios_core_install_firmware_base;rpcs3_ios_core_install_package=rpcs3_ios_core_install_package_base;rpcs3_ios_core_request_installation_cancel=rpcs3_ios_core_request_installation_cancel_base")
 
     target_sources(rpcs3_ios_core_framework PRIVATE
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreOperations.h"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreOperations.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacks.h"
         "${_rpcs3_ios_core_callbacks}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacksComposite.cpp"
