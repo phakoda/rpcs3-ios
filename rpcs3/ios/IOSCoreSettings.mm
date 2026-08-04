@@ -25,6 +25,8 @@ NSString* const settings_shader_cache = @"RPCS3Core.Settings.ShaderCache";
 NSString* const settings_performance_overlay = @"RPCS3Core.Settings.PerformanceOverlay";
 NSString* const settings_preferred_spu_threads = @"RPCS3Core.Settings.PreferredSPUThreads";
 
+constexpr NSInteger settings_version = 2;
+
 constexpr rpcs3_ios_configuration default_configuration()
 {
     return {
@@ -96,24 +98,40 @@ rpcs3_ios_configuration configuration_snapshot()
     };
 }
 
-rpcs3_ios_core_result apply_configuration(const rpcs3_ios_configuration& configuration)
+struct decoded_configuration
 {
-    if (configuration.struct_size < sizeof(rpcs3_ios_configuration))
+    ppu_decoder_type ppu_decoder = ppu_decoder_type::_static;
+    spu_decoder_type spu_decoder = spu_decoder_type::dynamic;
+    audio_renderer audio = audio_renderer::cubeb;
+    uint32_t volume = 100;
+    uint32_t resolution_scale = 100;
+    frame_limit_type frame_limit = frame_limit_type::_auto;
+    bool shader_cache = true;
+    bool performance_overlay = false;
+    uint32_t preferred_spu_threads = 0;
+};
+
+rpcs3_ios_core_result decode_configuration(
+    const rpcs3_ios_configuration& configuration,
+    decoded_configuration* decoded)
+{
+    if (!decoded || configuration.struct_size < sizeof(rpcs3_ios_configuration))
     {
         rpcs3::ios::set_core_last_error("The configuration structure is smaller than this RPCS3Core version expects.");
         return RPCS3_IOS_CORE_INVALID_ARGUMENT;
     }
 
+    decoded_configuration candidate{};
     switch (configuration.cpu_mode)
     {
     case RPCS3_IOS_CPU_PORTABLE:
-        g_cfg.core.ppu_decoder = ppu_decoder_type::_static;
-        g_cfg.core.spu_decoder = spu_decoder_type::dynamic;
+        candidate.ppu_decoder = ppu_decoder_type::_static;
+        candidate.spu_decoder = spu_decoder_type::dynamic;
         break;
     case RPCS3_IOS_CPU_PPU_LLVM:
 #ifdef RPCS3_IOS_HAS_LLVM
-        g_cfg.core.ppu_decoder = ppu_decoder_type::llvm;
-        g_cfg.core.spu_decoder = spu_decoder_type::dynamic;
+        candidate.ppu_decoder = ppu_decoder_type::llvm;
+        candidate.spu_decoder = spu_decoder_type::dynamic;
         break;
 #else
         rpcs3::ios::set_core_last_error("This RPCS3Core build does not include the LLVM PPU recompiler.");
@@ -121,8 +139,8 @@ rpcs3_ios_core_result apply_configuration(const rpcs3_ios_configuration& configu
 #endif
     case RPCS3_IOS_CPU_FULL_LLVM:
 #ifdef RPCS3_IOS_HAS_LLVM
-        g_cfg.core.ppu_decoder = ppu_decoder_type::llvm;
-        g_cfg.core.spu_decoder = spu_decoder_type::llvm;
+        candidate.ppu_decoder = ppu_decoder_type::llvm;
+        candidate.spu_decoder = spu_decoder_type::llvm;
         break;
 #else
         rpcs3::ios::set_core_last_error("This RPCS3Core build does not include the LLVM PPU/SPU recompilers.");
@@ -139,13 +157,37 @@ rpcs3_ios_core_result apply_configuration(const rpcs3_ios_configuration& configu
         return RPCS3_IOS_CORE_INVALID_ARGUMENT;
     }
 
-    g_cfg.audio.renderer = configuration.audio_enabled ? audio_renderer::cubeb : audio_renderer::null;
-    g_cfg.audio.volume = std::min<uint32_t>(configuration.audio_volume, 200);
-    g_cfg.video.resolution_scale_percent = std::clamp<uint32_t>(configuration.resolution_scale_percent, 25, 800);
-    g_cfg.video.frame_limit = decode_frame_limit(configuration.frame_limit);
-    g_cfg.video.disable_on_disk_shader_cache = configuration.shader_cache_enabled == 0;
-    g_cfg.video.perf_overlay.enabled = configuration.performance_overlay_enabled != 0;
-    g_cfg.core.preferred_spu_threads = std::min<uint32_t>(configuration.preferred_spu_threads, 6);
+    candidate.audio = configuration.audio_enabled ? audio_renderer::cubeb : audio_renderer::null;
+    candidate.volume = std::min<uint32_t>(configuration.audio_volume, 200);
+    candidate.resolution_scale = std::clamp<uint32_t>(configuration.resolution_scale_percent, 25, 800);
+    candidate.frame_limit = decode_frame_limit(configuration.frame_limit);
+    candidate.shader_cache = configuration.shader_cache_enabled != 0;
+    candidate.performance_overlay = configuration.performance_overlay_enabled != 0;
+    candidate.preferred_spu_threads = std::min<uint32_t>(configuration.preferred_spu_threads, 6);
+    *decoded = candidate;
+    return RPCS3_IOS_CORE_SUCCESS;
+}
+
+rpcs3_ios_core_result apply_configuration(const rpcs3_ios_configuration& configuration)
+{
+    decoded_configuration decoded{};
+    const rpcs3_ios_core_result result = decode_configuration(configuration, &decoded);
+    if (result != RPCS3_IOS_CORE_SUCCESS)
+    {
+        return result;
+    }
+
+    // Commit only after every field has been validated and normalized. Invalid
+    // requests therefore cannot partially change the active RPCS3 configuration.
+    g_cfg.core.ppu_decoder = decoded.ppu_decoder;
+    g_cfg.core.spu_decoder = decoded.spu_decoder;
+    g_cfg.audio.renderer = decoded.audio;
+    g_cfg.audio.volume = decoded.volume;
+    g_cfg.video.resolution_scale_percent = decoded.resolution_scale;
+    g_cfg.video.frame_limit = decoded.frame_limit;
+    g_cfg.video.disable_on_disk_shader_cache = !decoded.shader_cache;
+    g_cfg.video.perf_overlay.enabled = decoded.performance_overlay;
+    g_cfg.core.preferred_spu_threads = decoded.preferred_spu_threads;
 
     rpcs3::ios::apply_core_compatibility_defaults();
     rpcs3::ios::set_core_last_error({});
@@ -155,7 +197,7 @@ rpcs3_ios_core_result apply_configuration(const rpcs3_ios_configuration& configu
 void persist_configuration(const rpcs3_ios_configuration& configuration)
 {
     NSUserDefaults* defaults = NSUserDefaults.standardUserDefaults;
-    [defaults setInteger:1 forKey:settings_marker];
+    [defaults setInteger:settings_version forKey:settings_marker];
     [defaults setInteger:configuration.cpu_mode forKey:settings_cpu_mode];
     [defaults setBool:configuration.audio_enabled != 0 forKey:settings_audio_enabled];
     [defaults setInteger:configuration.audio_volume forKey:settings_audio_volume];
@@ -205,7 +247,8 @@ void load_core_configuration()
         apply_configuration(fallback);
         persist_configuration(fallback);
     }
-    else if (!persisted)
+    else if (!persisted ||
+             [NSUserDefaults.standardUserDefaults integerForKey:settings_marker] != settings_version)
     {
         persist_configuration(configuration_snapshot());
     }
