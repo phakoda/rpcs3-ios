@@ -159,6 +159,10 @@ extern "C"
 {
 size_t rpcs3_ios_core_midi_source_count(void)
 {
+    if (!rpcs3_ios_core_is_initialized())
+    {
+        return 0;
+    }
     ensure_identity_client();
     return static_cast<size_t>(MIDIGetNumberOfSources());
 }
@@ -169,6 +173,10 @@ rpcs3_ios_core_result rpcs3_ios_core_copy_midi_source(
     size_t name_size,
     size_t* required_size)
 {
+    if (!rpcs3_ios_core_is_initialized())
+    {
+        return RPCS3_IOS_CORE_NOT_INITIALIZED;
+    }
     ensure_identity_client();
     if (!required_size)
     {
@@ -195,6 +203,10 @@ rpcs3_ios_core_result rpcs3_ios_core_copy_midi_source(
 
 uint64_t rpcs3_ios_core_midi_topology_generation(void)
 {
+    if (!rpcs3_ios_core_is_initialized())
+    {
+        return g_topology_generation.load(std::memory_order_acquire);
+    }
     ensure_identity_client();
     return g_topology_generation.load(std::memory_order_acquire);
 }
