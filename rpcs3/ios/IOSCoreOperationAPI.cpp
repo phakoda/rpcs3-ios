@@ -1,4 +1,5 @@
 #include "IOSCoreEmulator.h"
+#include "IOSCoreLifecycle.h"
 #include "IOSCoreOperations.h"
 #include "RPCS3Core.h"
 
@@ -34,6 +35,17 @@ Result run_core_operation(
         return busy_result;
     }
     return function();
+}
+
+bool require_active_lifecycle()
+{
+    if (rpcs3::ios::core_lifecycle_allows_boot())
+    {
+        return true;
+    }
+    rpcs3::ios::set_core_last_error(
+        "Booting is unavailable while the application is inactive, backgrounded, or handling an audio interruption.");
+    return false;
 }
 }
 
@@ -73,6 +85,10 @@ rpcs3_ios_core_result rpcs3_ios_core_clear_render_view(void)
 
 rpcs3_ios_boot_result rpcs3_ios_core_boot_path(const char* path, uint8_t direct_boot)
 {
+    if (!require_active_lifecycle())
+    {
+        return RPCS3_IOS_BOOT_CURRENTLY_RESTRICTED;
+    }
     return run_core_operation(
         rpcs3::ios::core_operation::boot,
         RPCS3_IOS_BOOT_CURRENTLY_RESTRICTED,
@@ -105,6 +121,10 @@ rpcs3_ios_core_result rpcs3_ios_core_stop(void)
 
 rpcs3_ios_boot_result rpcs3_ios_core_restart(void)
 {
+    if (!require_active_lifecycle())
+    {
+        return RPCS3_IOS_BOOT_CURRENTLY_RESTRICTED;
+    }
     return run_core_operation(
         rpcs3::ios::core_operation::restart,
         RPCS3_IOS_BOOT_CURRENTLY_RESTRICTED,
