@@ -21,6 +21,7 @@ enum class core_operation : std::uint32_t
     settings,
     midi,
     render_host,
+    import_item,
 };
 
 class core_operation_scope final
