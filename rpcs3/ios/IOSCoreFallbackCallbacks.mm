@@ -80,8 +80,8 @@ std::u32string utf32_string(NSString* value)
 
     NSError* error = nil;
     AVAudioPlayer* player = [[AVAudioPlayer alloc]
-+        initWithContentsOfURL:[NSURL fileURLWithPath:path]
-+                        error:&error];
+        initWithContentsOfURL:[NSURL fileURLWithPath:path]
+                        error:&error];
     if (!player)
     {
         NSLog(@"RPCS3Core could not play sound %@: %@", path, error.localizedDescription);
