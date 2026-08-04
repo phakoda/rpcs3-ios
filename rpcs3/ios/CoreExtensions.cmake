@@ -20,7 +20,7 @@ if(TARGET rpcs3_ios_core_framework)
     # emulator, installer, and UIKit callback translation units.
     set_source_files_properties("${_rpcs3_ios_core_api}" PROPERTIES
         COMPILE_DEFINITIONS
-            "rpcs3_ios_core_initialize=rpcs3_ios_core_initialize_base;rpcs3_ios_core_shutdown=rpcs3_ios_core_shutdown_base;rpcs3_ios_core_set_render_view=rpcs3_ios_core_set_render_view_base;rpcs3_ios_core_clear_render_view=rpcs3_ios_core_clear_render_view_base")
+            "RPCS3CoreVersionNumber=RPCS3CoreVersionNumberBase;RPCS3CoreVersionString=RPCS3CoreVersionStringBase;rpcs3_ios_core_initialize=rpcs3_ios_core_initialize_base;rpcs3_ios_core_shutdown=rpcs3_ios_core_shutdown_base;rpcs3_ios_core_set_render_view=rpcs3_ios_core_set_render_view_base;rpcs3_ios_core_clear_render_view=rpcs3_ios_core_clear_render_view_base")
     set_source_files_properties("${_rpcs3_ios_core_callbacks}" PROPERTIES
         COMPILE_DEFINITIONS "extend_core_callbacks=extend_core_callbacks_base")
     set_source_files_properties("${_rpcs3_ios_core_emulator}" PROPERTIES
@@ -41,6 +41,7 @@ if(TARGET rpcs3_ios_core_framework)
 
     target_sources(rpcs3_ios_core_framework PRIVATE
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3CoreStatus.h"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreVersion.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreOperations.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreOperations.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreOperationAPI.cpp"
