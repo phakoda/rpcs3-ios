@@ -204,7 +204,7 @@ The shared iOS compatibility policy constrains persisted settings to linked back
 | Core renderer host | A host CAMetalLayer view is adapted to `GSFrameBase`; Vulkan or Null RSX is selected before boot. |
 | CoreMIDI | RtMidi ABI, public source connection, packet parsing, and persistent adapter assignments are present. |
 | Performance | Thermal, Low Power Mode, physical/available memory, and memory pressure are exposed. |
-| Displays | Screen connection and mode information are monitored; renderer migration remains open. |
+| Displays | External-display scenes and their connection/activation changes are monitored; renderer migration remains open. |
 | MoltenVK | Only public mobile configuration is used. |
 | Diagnostics | Device, app, memory, JIT, controller, path, MoltenVK, and display information are reportable. |
 
@@ -240,14 +240,14 @@ Generated adaptations fail CMake configuration when upstream anchors move.
 
 The iOS layer:
 
-- reports MAP_JIT, debugger state, thread write-protection support, and relevant entitlements;
+- reports MAP_JIT, debugger state, platform-available write-protection support, and relevant entitlements;
 - creates MAP_JIT memory with protections sufficient for generation and execution;
-- creates separate RW and RX aliases with `mach_vm_remap` when possible;
-- falls back to thread write protection for a shared mapping;
+- creates separate RW and RX aliases with `vm_remap` when possible (`mach_vm_remap` on macOS);
+- falls back to a shared MAP_JIT mapping, using macOS thread write protection where that API is available;
 - invalidates the instruction cache before execution;
 - includes an explicit ARM64 function probe;
 - exposes public external JIT-provider requests and attachment polling;
-- integrates Apple's write barrier into RPCS3's native WX/RX transitions.
+- integrates Apple's write barrier into RPCS3's native WX/RX transitions where the target SDK exposes it.
 
 LLVM remains optional and disabled by default. A target LLVM package does not grant JIT capability.
 

@@ -49,6 +49,7 @@ REQUIRED_FILES = (
     "rpcs3/ios/IOSVulkanProbe.mm",
     "rpcs3/ios/platform/IOSPlatform.h",
     "rpcs3/ios/platform/IOSPlatform.mm",
+    "rpcs3/ios/platform/IOSSecTask.h",
     "rpcs3/ios/platform/IOSJIT.mm",
     "rpcs3/ios/platform/IOSJITProvider.mm",
     "rpcs3/ios/platform/IOSPerformance.mm",
@@ -250,7 +251,12 @@ def validate_platform_contracts(root: Path, errors: list[str]) -> None:
         require(errors, api in platform, f"expanded iOS platform API missing: {api}")
 
     jit = (root / "rpcs3/ios/platform/IOSJIT.mm").read_text(encoding="utf-8")
-    for contract in ("mach_vm_remap", "sys_icache_invalidate", "pthread_jit_write_protect_np"):
+    require(
+        errors,
+        "mach_vm_remap" in jit or "vm_remap" in jit,
+        "JIT memory contract missing: vm_remap/mach_vm_remap",
+    )
+    for contract in ("sys_icache_invalidate", "pthread_jit_write_protect_np"):
         require(errors, contract in jit, f"JIT memory contract missing: {contract}")
 
     provider = (root / "rpcs3/ios/platform/IOSJITProvider.mm").read_text(encoding="utf-8")
@@ -260,6 +266,15 @@ def validate_platform_contracts(root: Path, errors: list[str]) -> None:
     controller = (root / "rpcs3/ios/platform/IOSControllerFeatures.mm").read_text(encoding="utf-8")
     for contract in ("CoreMotion", "CoreHaptics", "GCHapticsLocalityAll", "deviceMotion"):
         require(errors, contract in controller, f"controller feature contract missing: {contract}")
+
+    external_display = (root / "rpcs3/ios/platform/IOSExternalDisplay.mm").read_text(encoding="utf-8")
+    for contract in (
+        "UIWindowSceneSessionRoleExternalDisplayNonInteractive",
+        "UISceneWillConnectNotification",
+        "UISceneDidDisconnectNotification",
+        "UIScreenModeDidChangeNotification",
+    ):
+        require(errors, contract in external_display, f"external-display scene contract missing: {contract}")
 
     moltenvk = (root / "rpcs3/ios/platform/IOSMoltenVK.mm").read_text(encoding="utf-8")
     for forbidden in FORBIDDEN_SOURCE_MARKERS[:3]:
@@ -278,10 +293,23 @@ def validate_docs(root: Path, errors: list[str]) -> None:
     combined = "\n".join((root / name).read_text(encoding="utf-8") for name in (
         "BUILDING_IOS.md", "PORTING_IOS.md", "IOS_CORE_API.md",
     ))
-    for phrase in (
-        "no Apple", "Xcode", "device", "simulator", "firmware", "frame presentation",
-    ):
+    for phrase in ("Xcode", "device", "simulator", "firmware", "frame presentation"):
         require(errors, phrase.lower() in combined.lower(), f"documentation evidence boundary is missing: {phrase}")
+    lower = combined.lower()
+    has_evidence_boundary = any(
+        marker in lower
+        for marker in (
+            "does not claim",
+            "does not establish",
+            "apple-side proof",
+            "evidence gates",
+        )
+    )
+    require(
+        errors,
+        has_evidence_boundary,
+        "documentation evidence boundary is missing: explicit Apple build/runtime disclaimer",
+    )
 
 
 def validate_no_diff_artifacts(root: Path, errors: list[str]) -> None:

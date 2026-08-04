@@ -7,11 +7,11 @@ usage() {
 }
 
 [[ $# -eq 2 ]] || usage
-XCFRAMEWORK="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+[[ -d "$1" ]] || { echo "error: XCFramework not found: $1" >&2; exit 1; }
+XCFRAMEWORK="$(cd "$1" && pwd)"
 OUTPUT_DIR="$2"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-[[ -d "${XCFRAMEWORK}" ]] || { echo "error: XCFramework not found: ${XCFRAMEWORK}" >&2; exit 1; }
 "${ROOT}/buildfiles/ios/verify_core_xcframework.sh" "${XCFRAMEWORK}"
 
 rm -rf "${OUTPUT_DIR}"

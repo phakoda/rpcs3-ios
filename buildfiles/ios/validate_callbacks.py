@@ -87,8 +87,8 @@ def main() -> int:
         "Could not apply the iOS core management-host adaptation",
     ):
         require(errors, contract in host_patch, f"generated management-host contract is missing: {contract}")
-    require(errors, host_patch.count("const std::string path_copy = path;") >= 4,
-            "management-host patch does not define and validate all explicit path copies")
+    require(errors, host_patch.count("const std::string path_copy = path;") == 3,
+            "management-host patch does not define exactly one path copy for each adapted operation")
 
     for contract in (
         "class ios_msg_dialog",

@@ -187,7 +187,7 @@ std::pair<uint32_t, std::string> copy_midi_assignment(uint32_t slot)
 
 static void core_event_callback(rpcs3_ios_core_event event, const char* detail, void* context)
 {
-    RPCS3CoreLinkViewController* controller = (__bridge RPCS3CoreLinkViewController*)context;
+    id controller = (__bridge id)context;
     NSString* detail_string = detail ? [NSString stringWithUTF8String:detail] : @"";
     [controller performSelectorOnMainThread:@selector(handleCoreEvent:)
                                 withObject:@{@"event": @(event), @"detail": detail_string ?: @""}
@@ -202,7 +202,7 @@ static void installation_progress_callback(
     const char* detail,
     void* context)
 {
-    RPCS3CoreLinkViewController* controller = (__bridge RPCS3CoreLinkViewController*)context;
+    id controller = (__bridge id)context;
     NSString* detail_string = detail ? [NSString stringWithUTF8String:detail] : @"";
     [controller performSelectorOnMainThread:@selector(handleInstallationProgress:)
                                 withObject:@{
@@ -788,12 +788,17 @@ typedef NS_ENUM(NSInteger, RPCS3PickerPurpose)
 
     __weak RPCS3CoreLinkViewController* weak_self = self;
     [sheet addAction:[UIAlertAction actionWithTitle:@"Prune Missing Roots" style:UIAlertActionStyleDefault handler:^(UIAlertAction*) {
+        RPCS3CoreLinkViewController* strong_self = weak_self;
+        if (!strong_self)
+        {
+            return;
+        }
         uint32_t removed = 0;
         const rpcs3_ios_core_result result = rpcs3_ios_core_prune_missing_game_directories(&removed);
-        weak_self->_eventStatus.text = result == RPCS3_IOS_CORE_SUCCESS
+        strong_self->_eventStatus.text = result == RPCS3_IOS_CORE_SUCCESS
             ? [NSString stringWithFormat:@"Pruned %u missing root(s).", removed]
             : [NSString stringWithFormat:@"Prune failed: %@", ns_string(copy_core_string(rpcs3_ios_core_copy_last_error))];
-        [weak_self refreshStatus];
+        [strong_self refreshStatus];
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Clear All Roots" style:UIAlertActionStyleDestructive handler:^(UIAlertAction*) {
         [weak_self confirmClearDirectories];
@@ -867,27 +872,34 @@ typedef NS_ENUM(NSInteger, RPCS3PickerPurpose)
         {
             continue;
         }
+        const std::string title_id_copy = title_id;
+        const std::string game_path_copy = path;
         NSString* title = title_id.empty() ? ns_string(path).lastPathComponent : ns_string(title_id);
         __weak RPCS3CoreLinkViewController* weak_self = self;
         [sheet addAction:[UIAlertAction actionWithTitle:title
             style:destructive ? UIAlertActionStyleDestructive : UIAlertActionStyleDefault
             handler:^(UIAlertAction*) {
+                RPCS3CoreLinkViewController* strong_self = weak_self;
+                if (!strong_self)
+                {
+                    return;
+                }
                 if (destructive)
                 {
-                    const rpcs3_ios_core_result result = rpcs3_ios_core_remove_game(title_id.c_str());
-                    weak_self->_eventStatus.text = result == RPCS3_IOS_CORE_SUCCESS
+                    const rpcs3_ios_core_result result = rpcs3_ios_core_remove_game(title_id_copy.c_str());
+                    strong_self->_eventStatus.text = result == RPCS3_IOS_CORE_SUCCESS
                         ? [NSString stringWithFormat:@"Removed %@ from the library.", title]
                         : [NSString stringWithFormat:@"Remove failed: %@", ns_string(copy_core_string(rpcs3_ios_core_copy_last_error))];
                 }
                 else
                 {
-                    const rpcs3_ios_boot_result result = rpcs3_ios_core_boot_path(path.c_str(), 1);
-                    weak_self->_eventStatus.text = result == RPCS3_IOS_BOOT_SUCCESS
+                    const rpcs3_ios_boot_result result = rpcs3_ios_core_boot_path(game_path_copy.c_str(), 1);
+                    strong_self->_eventStatus.text = result == RPCS3_IOS_BOOT_SUCCESS
                         ? [NSString stringWithFormat:@"Boot accepted: %@", title]
                         : [NSString stringWithFormat:@"Boot result %u: %@", (unsigned int)result,
                             ns_string(copy_core_string(rpcs3_ios_core_copy_last_error))];
                 }
-                [weak_self refreshStatus];
+                [strong_self refreshStatus];
             }]];
     }
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
@@ -922,11 +934,16 @@ typedef NS_ENUM(NSInteger, RPCS3PickerPurpose)
     }
     __weak RPCS3CoreLinkViewController* weak_self = self;
     [sheet addAction:[UIAlertAction actionWithTitle:@"Clear All Assignments" style:UIAlertActionStyleDestructive handler:^(UIAlertAction*) {
+        RPCS3CoreLinkViewController* strong_self = weak_self;
+        if (!strong_self)
+        {
+            return;
+        }
         const rpcs3_ios_core_result result = rpcs3_ios_core_clear_all_midi_assignments();
-        weak_self->_eventStatus.text = result == RPCS3_IOS_CORE_SUCCESS
+        strong_self->_eventStatus.text = result == RPCS3_IOS_CORE_SUCCESS
             ? @"Cleared every CoreMIDI adapter assignment."
             : [NSString stringWithFormat:@"MIDI clear failed: %@", ns_string(copy_core_string(rpcs3_ios_core_copy_last_error))];
-        [weak_self refreshStatus];
+        [strong_self refreshStatus];
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [self configurePopover:sheet source:sender];
@@ -947,11 +964,16 @@ typedef NS_ENUM(NSInteger, RPCS3PickerPurpose)
     }
     __weak RPCS3CoreLinkViewController* weak_self = self;
     [sheet addAction:[UIAlertAction actionWithTitle:@"Clear Slot" style:UIAlertActionStyleDestructive handler:^(UIAlertAction*) {
+        RPCS3CoreLinkViewController* strong_self = weak_self;
+        if (!strong_self)
+        {
+            return;
+        }
         const rpcs3_ios_core_result result = rpcs3_ios_core_clear_midi_assignment(slot);
-        weak_self->_eventStatus.text = result == RPCS3_IOS_CORE_SUCCESS
+        strong_self->_eventStatus.text = result == RPCS3_IOS_CORE_SUCCESS
             ? [NSString stringWithFormat:@"Cleared MIDI slot %u.", slot + 1]
             : [NSString stringWithFormat:@"MIDI clear failed: %@", ns_string(copy_core_string(rpcs3_ios_core_copy_last_error))];
-        [weak_self refreshStatus];
+        [strong_self refreshStatus];
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [self configurePopover:sheet source:_configureMidiButton];
@@ -970,13 +992,19 @@ typedef NS_ENUM(NSInteger, RPCS3PickerPurpose)
         {
             continue;
         }
+        const std::string source_copy = source;
         __weak RPCS3CoreLinkViewController* weak_self = self;
         [sheet addAction:[UIAlertAction actionWithTitle:ns_string(source) style:UIAlertActionStyleDefault handler:^(UIAlertAction*) {
-            const rpcs3_ios_core_result result = rpcs3_ios_core_set_midi_assignment(slot, type, source.c_str());
-            weak_self->_eventStatus.text = result == RPCS3_IOS_CORE_SUCCESS
-                ? [NSString stringWithFormat:@"Assigned %@ to MIDI slot %u as %@.", ns_string(source), slot + 1, midi_type_name(type)]
+            RPCS3CoreLinkViewController* strong_self = weak_self;
+            if (!strong_self)
+            {
+                return;
+            }
+            const rpcs3_ios_core_result result = rpcs3_ios_core_set_midi_assignment(slot, type, source_copy.c_str());
+            strong_self->_eventStatus.text = result == RPCS3_IOS_CORE_SUCCESS
+                ? [NSString stringWithFormat:@"Assigned %@ to MIDI slot %u as %@.", ns_string(source_copy), slot + 1, midi_type_name(type)]
                 : [NSString stringWithFormat:@"MIDI assignment failed: %@", ns_string(copy_core_string(rpcs3_ios_core_copy_last_error))];
-            [weak_self refreshStatus];
+            [strong_self refreshStatus];
         }]];
     }
     if (!count)
@@ -1067,12 +1095,17 @@ typedef NS_ENUM(NSInteger, RPCS3PickerPurpose)
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     __weak RPCS3CoreLinkViewController* weak_self = self;
     [alert addAction:[UIAlertAction actionWithTitle:@"Reset" style:UIAlertActionStyleDestructive handler:^(UIAlertAction*) {
+        RPCS3CoreLinkViewController* strong_self = weak_self;
+        if (!strong_self)
+        {
+            return;
+        }
         const rpcs3_ios_core_result result = rpcs3_ios_core_reset_configuration();
-        weak_self->_eventStatus.text = result == RPCS3_IOS_CORE_SUCCESS
+        strong_self->_eventStatus.text = result == RPCS3_IOS_CORE_SUCCESS
             ? @"Core settings reset to mobile-safe defaults."
             : [NSString stringWithFormat:@"Reset failed: %@", ns_string(copy_core_string(rpcs3_ios_core_copy_last_error))];
-        [weak_self loadSettingsControls];
-        [weak_self refreshStatus];
+        [strong_self loadSettingsControls];
+        [strong_self refreshStatus];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
 }

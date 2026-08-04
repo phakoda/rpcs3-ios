@@ -7,7 +7,8 @@ usage() {
 }
 
 [[ $# -eq 2 ]] || usage
-FRAMEWORK="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+[[ -d "$1" ]] || { echo "error: framework not found: $1" >&2; exit 1; }
+FRAMEWORK="$(cd "$1" && pwd)"
 PLATFORM="$2"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CONTRACTS="${ROOT}/buildfiles/ios/contracts"
@@ -25,7 +26,6 @@ case "${PLATFORM}" in
     *) usage ;;
 esac
 
-[[ -d "${FRAMEWORK}" ]] || { echo "error: framework not found: ${FRAMEWORK}" >&2; exit 1; }
 FRAMEWORK_PARENT="$(dirname "${FRAMEWORK}")"
 SDKROOT="$(xcrun --sdk "${SDK}" --show-sdk-path)"
 

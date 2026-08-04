@@ -179,15 +179,15 @@ rpcs3_ios_core_result apply_configuration(const rpcs3_ios_configuration& configu
 
     // Commit only after every field has been validated and normalized. Invalid
     // requests therefore cannot partially change the active RPCS3 configuration.
-    g_cfg.core.ppu_decoder = decoded.ppu_decoder;
-    g_cfg.core.spu_decoder = decoded.spu_decoder;
-    g_cfg.audio.renderer = decoded.audio;
-    g_cfg.audio.volume = decoded.volume;
-    g_cfg.video.resolution_scale_percent = decoded.resolution_scale;
-    g_cfg.video.frame_limit = decoded.frame_limit;
-    g_cfg.video.disable_on_disk_shader_cache = !decoded.shader_cache;
-    g_cfg.video.perf_overlay.enabled = decoded.performance_overlay;
-    g_cfg.core.preferred_spu_threads = decoded.preferred_spu_threads;
+    g_cfg.core.ppu_decoder.set(decoded.ppu_decoder);
+    g_cfg.core.spu_decoder.set(decoded.spu_decoder);
+    g_cfg.audio.renderer.set(decoded.audio);
+    g_cfg.audio.volume.set(decoded.volume);
+    g_cfg.video.resolution_scale_percent.set(decoded.resolution_scale);
+    g_cfg.video.frame_limit.set(decoded.frame_limit);
+    g_cfg.video.disable_on_disk_shader_cache.set(!decoded.shader_cache);
+    g_cfg.video.perf_overlay.enabled.set(decoded.performance_overlay);
+    g_cfg.core.preferred_spu_threads.set(decoded.preferred_spu_threads);
 
     rpcs3::ios::apply_core_compatibility_defaults();
     rpcs3::ios::set_core_last_error({});

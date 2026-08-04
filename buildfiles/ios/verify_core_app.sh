@@ -2,10 +2,10 @@
 set -euo pipefail
 
 [[ $# -eq 1 ]] || { echo "usage: $0 /path/to/RPCS3\ iOS\ Core.app" >&2; exit 2; }
-APP="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+[[ -d "$1" ]] || { echo "error: app bundle not found: $1" >&2; exit 1; }
+APP="$(cd "$1" && pwd)"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-[[ -d "${APP}" ]] || { echo "error: app bundle not found: ${APP}" >&2; exit 1; }
 [[ -f "${APP}/Info.plist" ]] || { echo "error: missing app Info.plist" >&2; exit 1; }
 plutil -lint "${APP}/Info.plist" >/dev/null
 

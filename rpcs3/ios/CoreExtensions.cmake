@@ -77,6 +77,7 @@ if(TARGET rpcs3_ios_core_framework)
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreMIDIComposition.mm"
         "${_rpcs3_ios_core_library}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstaller.h"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstallerSupport.cpp"
         "${_rpcs3_ios_core_installer}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstallerTransaction.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstallerRecovery.cpp"

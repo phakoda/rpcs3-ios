@@ -212,7 +212,7 @@ string(REPLACE
     "[weak_self removeDirectory:path_copy removeEntries:YES];"
     _core_host_contents "${_core_host_contents}")
 
-string(REGEX MATCHALL "const std::string path_copy = path;" _host_path_copies
+string(REGEX MATCHALL "const std::string path_copy = path" _host_path_copies
     "${_core_host_contents}")
 list(LENGTH _host_path_copies _host_path_copy_count)
 if(NOT _core_host_contents MATCHES "RPCS3CoreStatus\\.h" OR

@@ -7,12 +7,12 @@ usage() {
 }
 
 [[ $# -ge 1 && $# -le 2 ]] || usage
-FRAMEWORK="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+[[ -d "$1" ]] || { echo "error: framework not found: $1" >&2; exit 1; }
+FRAMEWORK="$(cd "$1" && pwd)"
 EXPECTED_PLATFORM="${2:-}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 EXPECTED_EXPORTS="${ROOT}/rpcs3/ios/RPCS3Core.exports"
 
-[[ -d "${FRAMEWORK}" ]] || { echo "error: framework not found: ${FRAMEWORK}" >&2; exit 1; }
 [[ -f "${FRAMEWORK}/Info.plist" ]] || { echo "error: missing framework Info.plist" >&2; exit 1; }
 [[ -f "${FRAMEWORK}/Headers/RPCS3Core.h" ]] || { echo "error: missing RPCS3Core.h" >&2; exit 1; }
 [[ -f "${FRAMEWORK}/Headers/RPCS3CoreStatus.h" ]] || { echo "error: missing RPCS3CoreStatus.h" >&2; exit 1; }

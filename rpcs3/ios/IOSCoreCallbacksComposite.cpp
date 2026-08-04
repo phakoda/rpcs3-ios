@@ -4,6 +4,8 @@
 #include "IOSCoreLifecycle.h"
 #include "IOSCoreSaveDialog.h"
 
+#include "Emu/System.h"
+
 #include <utility>
 
 namespace rpcs3::ios

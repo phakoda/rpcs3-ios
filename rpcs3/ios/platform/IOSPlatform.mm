@@ -1,9 +1,10 @@
 #include "IOSPlatform.h"
+#include "IOSSecTask.h"
 
 #import <AVFoundation/AVFoundation.h>
 #import <Foundation/Foundation.h>
 #import <GameController/GameController.h>
-#import <Security/SecTask.h>
+#import <TargetConditionals.h>
 #import <UIKit/UIKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
@@ -293,9 +294,10 @@ UIViewController* top_view_controller(UIViewController* controller)
 
 UIViewController* active_presenter()
 {
+    UIWindow* fallback_window = nil;
     for (UIScene* scene in UIApplication.sharedApplication.connectedScenes)
     {
-        if (scene.activationState != UISceneActivationStateForegroundActive || ![scene isKindOfClass:UIWindowScene.class])
+        if (![scene isKindOfClass:UIWindowScene.class])
         {
             continue;
         }
@@ -304,17 +306,21 @@ UIViewController* active_presenter()
         {
             if (window.isKeyWindow && window.rootViewController)
             {
-                return top_view_controller(window.rootViewController);
+                if (scene.activationState == UISceneActivationStateForegroundActive)
+                {
+                    return top_view_controller(window.rootViewController);
+                }
+                if (!fallback_window)
+                {
+                    fallback_window = window;
+                }
             }
         }
     }
 
-    for (UIWindow* window in UIApplication.sharedApplication.windows)
+    if (fallback_window)
     {
-        if (window.isKeyWindow && window.rootViewController)
-        {
-            return top_view_controller(window.rootViewController);
-        }
+        return top_view_controller(fallback_window.rootViewController);
     }
     return nil;
 }
@@ -625,10 +631,12 @@ jit_capabilities query_jit_capabilities()
     }
 #endif
 
-    if (@available(iOS 14.0, *))
+#if defined(TARGET_OS_OSX) && TARGET_OS_OSX
+    if (@available(macOS 11.0, *))
     {
         result.jit_write_protect_available = pthread_jit_write_protect_supported_np() != 0;
     }
+#endif
 
     result.dynamic_codesigning_entitlement = entitlement_is_true(CFSTR("dynamic-codesigning"));
     result.allow_jit_entitlement = entitlement_is_true(CFSTR("com.apple.security.cs.allow-jit"));

@@ -2,11 +2,11 @@
 set -euo pipefail
 
 [[ $# -eq 1 ]] || { echo "usage: $0 /path/to/RPCS3Core.xcframework" >&2; exit 2; }
-XCFRAMEWORK="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+[[ -d "$1" ]] || { echo "error: XCFramework not found: $1" >&2; exit 1; }
+XCFRAMEWORK="$(cd "$1" && pwd)"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERIFY_FRAMEWORK="${ROOT}/buildfiles/ios/verify_core_framework.sh"
 
-[[ -d "${XCFRAMEWORK}" ]] || { echo "error: XCFramework not found: ${XCFRAMEWORK}" >&2; exit 1; }
 [[ -f "${XCFRAMEWORK}/Info.plist" ]] || { echo "error: missing XCFramework Info.plist" >&2; exit 1; }
 plutil -lint "${XCFRAMEWORK}/Info.plist" >/dev/null
 

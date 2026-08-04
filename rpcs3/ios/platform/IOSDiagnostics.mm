@@ -219,3 +219,4 @@ bool write_diagnostics_report(std::string* report_path, std::string* error)
     }
     return true;
 }
+}

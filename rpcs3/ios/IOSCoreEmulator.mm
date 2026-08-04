@@ -96,7 +96,7 @@ video_renderer selected_core_renderer()
 void apply_core_runtime_settings()
 {
     rpcs3::ios::apply_core_compatibility_defaults();
-    g_cfg.video.renderer = selected_core_renderer();
+    g_cfg.video.renderer.set(selected_core_renderer());
 }
 
 void clear_event_callback()

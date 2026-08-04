@@ -13,11 +13,17 @@ rpcs3::ios::external_display_callback g_display_callback;
 
 UIScreen* external_screen()
 {
-    for (UIScreen* screen in UIScreen.screens)
+    for (UIScene* scene in UIApplication.sharedApplication.connectedScenes)
     {
-        if (screen != UIScreen.mainScreen)
+        if (![scene isKindOfClass:UIWindowScene.class])
         {
-            return screen;
+            continue;
+        }
+
+        UIWindowScene* window_scene = (UIWindowScene*)scene;
+        if ([window_scene.session.role isEqualToString:UIWindowSceneSessionRoleExternalDisplayNonInteractive])
+        {
+            return window_scene.screen;
         }
     }
     return nil;
@@ -51,11 +57,17 @@ void deliver_display_state()
 
     NSNotificationCenter* center = NSNotificationCenter.defaultCenter;
     [center addObserver:self selector:@selector(screenChanged:)
-                   name:UIScreenDidConnectNotification object:nil];
+                   name:UISceneWillConnectNotification object:nil];
     [center addObserver:self selector:@selector(screenChanged:)
-                   name:UIScreenDidDisconnectNotification object:nil];
+                   name:UISceneDidDisconnectNotification object:nil];
+    [center addObserver:self selector:@selector(screenChanged:)
+                   name:UISceneDidActivateNotification object:nil];
+    [center addObserver:self selector:@selector(screenChanged:)
+                   name:UISceneWillDeactivateNotification object:nil];
     [center addObserver:self selector:@selector(screenChanged:)
                    name:UIScreenModeDidChangeNotification object:nil];
+    [center addObserver:self selector:@selector(screenChanged:)
+                   name:UIScreenReferenceDisplayModeStatusDidChangeNotification object:nil];
     return self;
 }
 

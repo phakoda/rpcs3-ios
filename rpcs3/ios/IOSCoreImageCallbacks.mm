@@ -156,7 +156,8 @@ bool scaled_image(
         8,
         static_cast<size_t>(width) * 4,
         color_space,
-        kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+        static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedLast) |
+            static_cast<CGBitmapInfo>(kCGBitmapByteOrder32Big));
     CGColorSpaceRelease(color_space);
     if (!context)
     {

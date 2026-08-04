@@ -61,6 +61,8 @@ GCController* controller_at_index(std::size_t index)
     return index < controllers.count ? controllers[index] : nil;
 }
 
+}
+
 @interface RPCS3HapticDriver : NSObject
 - (instancetype)initWithEngine:(CHHapticEngine*)engine;
 - (BOOL)setLowFrequency:(float)low highFrequency:(float)high;
@@ -204,6 +206,10 @@ GCController* controller_at_index(std::size_t index)
     _started = NO;
 }
 @end
+
+namespace
+{
+using namespace rpcs3::ios;
 
 std::mutex g_haptics_mutex;
 NSMapTable<GCController*, RPCS3HapticDriver*>* g_controller_haptics = nil;

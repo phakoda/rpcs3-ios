@@ -277,7 +277,7 @@ def validate_operation_gate(errors: list[str]) -> None:
 def validate_settings(errors: list[str]) -> None:
     settings = read("rpcs3/ios/IOSCoreSettings.mm")
     decode_position = settings.find("decode_configuration(")
-    commit_position = settings.find("g_cfg.core.ppu_decoder = decoded.ppu_decoder")
+    commit_position = settings.find("g_cfg.core.ppu_decoder.set(decoded.ppu_decoder)")
     require(errors, decode_position >= 0 and commit_position > decode_position,
             "settings are not decoded before committing g_cfg")
     for contract in (

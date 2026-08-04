@@ -1,4 +1,5 @@
 #include "IOSCoreEmulator.h"
+#include "IOSCoreInstallerSupport.h"
 #include "RPCS3Core.h"
 
 #include "Emu/System.h"
@@ -7,6 +8,7 @@
 #include "Emu/vfs_config.h"
 #include "Loader/PUP.h"
 #include "Utilities/File.h"
+#include "util/sysinfo.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -194,36 +196,7 @@ bool copy_tree(const hostfs::path& source, const hostfs::path& destination, std:
 
 std::vector<unsigned long long> version_components(const std::string& value)
 {
-    std::vector<unsigned long long> components;
-    unsigned long long component = 0;
-    bool reading = false;
-    for (const unsigned char byte : value)
-    {
-        if (std::isdigit(byte))
-        {
-            reading = true;
-            const unsigned int digit = byte - '0';
-            if (component <= (std::numeric_limits<unsigned long long>::max() - digit) / 10)
-            {
-                component = component * 10 + digit;
-            }
-        }
-        else if (reading)
-        {
-            components.push_back(component);
-            component = 0;
-            reading = false;
-        }
-    }
-    if (reading)
-    {
-        components.push_back(component);
-    }
-    while (components.size() > 1 && components.back() == 0)
-    {
-        components.pop_back();
-    }
-    return components;
+    return rpcs3::ios::parse_firmware_version_components(value);
 }
 
 bool version_less(const std::string& candidate, const std::string& installed)
@@ -531,11 +504,6 @@ bool commit_staging(const transaction_paths& paths, std::string* error_message)
     return true;
 }
 
-void set_transaction_last_path(std::string path)
-{
-    std::lock_guard lock(g_transaction_mutex);
-    g_transaction_last_path = std::move(path);
-}
 }
 
 extern "C"
@@ -564,7 +532,7 @@ rpcs3_ios_core_result rpcs3_ios_core_install_firmware_base(
         return RPCS3_IOS_CORE_PLATFORM_ERROR;
     }
 
-    const std::string installed_version = rpcs3::utils::get_firmware_version();
+    const std::string installed_version = utils::get_firmware_version();
     const std::string candidate_version = read_pup_version(pup_path);
     if (!allow_downgrade && !installed_version.empty() && !candidate_version.empty() &&
         version_less(candidate_version, installed_version))

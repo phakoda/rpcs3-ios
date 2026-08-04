@@ -181,18 +181,43 @@ jobs:
         run: |
           TARGET=arm64-apple-ios16.0-simulator
           SDKROOT="$(xcrun --sdk iphonesimulator --show-sdk-path)"
-          COMMON=(-std=c++20 -target "$TARGET" -isysroot "$SDKROOT" -fsyntax-only)
+          COMMON=(-std=c++23 -Wall -Wextra -Werror -target "$TARGET" -isysroot "$SDKROOT" -fsyntax-only)
+          CORE_INCLUDE=(-I. -Irpcs3 -Irpcs3/ios)
           xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" \
             -I3rdparty/ios/rtmidi/include \
             3rdparty/ios/rtmidi/rtmidi_coremidi_v2.cpp
-          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" -fobjc-arc -fblocks -Irpcs3/ios \
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
             rpcs3/ios/IOSCoreLifecycleDeferred.mm
-          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" -fobjc-arc -fblocks -Irpcs3/ios \
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
             rpcs3/ios/IOSCoreMIDIComposition.mm
-          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" -fobjc-arc -fblocks -Irpcs3/ios \
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
             rpcs3/ios/IOSCoreMIDIIdentity.mm
-          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" -fobjc-arc -fblocks -Irpcs3/ios \
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
             rpcs3/ios/IOSCoreOpenURL.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" \
+            rpcs3/ios/IOSCoreCallbacksComposite.cpp
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" \
+            rpcs3/ios/IOSCoreDefaults.cpp
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" \
+            rpcs3/ios/IOSCoreInstallerTransaction.cpp
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/IOSCoreMIDI.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/IOSCoreSettings.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/IOSCoreCallbacks.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/IOSCoreImageCallbacks.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/platform/IOSControllerFeatures.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/platform/IOSDiagnostics.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/platform/IOSExternalDisplay.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/platform/IOSJIT.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/platform/IOSPlatform.mm
 
       - name: Upload Apple syntax logs and consumers
         if: always()

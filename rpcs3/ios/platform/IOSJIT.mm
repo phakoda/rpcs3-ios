@@ -1,10 +1,11 @@
 #include "IOSPlatform.h"
+#include "IOSSecTask.h"
 
-#import <Security/SecTask.h>
+#import <TargetConditionals.h>
 
 #include <libkern/OSCacheControl.h>
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
+#include <mach/vm_map.h>
 #include <pthread.h>
 #include <sys/mman.h>
 #include <sys/sysctl.h>
@@ -74,14 +75,11 @@ namespace rpcs3::ios
 {
 bool set_jit_write_protection(bool executable_mode)
 {
-#if defined(__aarch64__) || defined(__arm64__)
-    if (@available(iOS 14.0, *))
+#if defined(TARGET_OS_OSX) && TARGET_OS_OSX
+    if (@available(macOS 11.0, *))
     {
-        if (pthread_jit_write_protect_supported_np() != 0)
-        {
-            pthread_jit_write_protect_np(executable_mode ? 1 : 0);
-            return true;
-        }
+        pthread_jit_write_protect_np(executable_mode ? 1 : 0);
+        return true;
     }
 #else
     (void)executable_mode;
@@ -150,17 +148,17 @@ bool allocate_jit_memory(std::size_t size, jit_memory_region* region, std::strin
         MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
     if (executable != MAP_FAILED)
     {
-        mach_vm_address_t writable_address = 0;
+        vm_address_t writable_address = 0;
         vm_prot_t current_protection = VM_PROT_NONE;
         vm_prot_t maximum_protection = VM_PROT_NONE;
-        const kern_return_t remap_result = mach_vm_remap(
+        const kern_return_t remap_result = vm_remap(
             mach_task_self(),
             &writable_address,
-            static_cast<mach_vm_size_t>(size),
+            static_cast<vm_size_t>(size),
             0,
             VM_FLAGS_ANYWHERE,
             mach_task_self(),
-            reinterpret_cast<mach_vm_address_t>(executable),
+            reinterpret_cast<vm_address_t>(executable),
             FALSE,
             &current_protection,
             &maximum_protection,
@@ -168,16 +166,16 @@ bool allocate_jit_memory(std::size_t size, jit_memory_region* region, std::strin
 
         if (remap_result == KERN_SUCCESS)
         {
-            const kern_return_t writable_protect_result = mach_vm_protect(
+            const kern_return_t writable_protect_result = vm_protect(
                 mach_task_self(),
                 writable_address,
-                static_cast<mach_vm_size_t>(size),
+                static_cast<vm_size_t>(size),
                 FALSE,
                 VM_PROT_READ | VM_PROT_WRITE);
-            const kern_return_t executable_protect_result = mach_vm_protect(
+            const kern_return_t executable_protect_result = vm_protect(
                 mach_task_self(),
-                reinterpret_cast<mach_vm_address_t>(executable),
-                static_cast<mach_vm_size_t>(size),
+                reinterpret_cast<vm_address_t>(executable),
+                static_cast<vm_size_t>(size),
                 FALSE,
                 VM_PROT_READ | VM_PROT_EXECUTE);
 
@@ -191,7 +189,7 @@ bool allocate_jit_memory(std::size_t size, jit_memory_region* region, std::strin
                 return true;
             }
 
-            mach_vm_deallocate(mach_task_self(), writable_address, static_cast<mach_vm_size_t>(size));
+            vm_deallocate(mach_task_self(), writable_address, static_cast<vm_size_t>(size));
         }
         ::munmap(executable, size);
     }
@@ -209,8 +207,8 @@ bool allocate_jit_memory(std::size_t size, jit_memory_region* region, std::strin
     region->executable = shared;
     region->size = size;
     region->dual_mapped = false;
-    // Shared mappings stay in write mode until publish_jit_memory switches the
-    // current thread back to executable mode.
+    // Shared MAP_JIT mappings stay writable until publication. macOS can switch
+    // the current thread's write protection; iOS relies on MAP_JIT entitlements.
     return true;
 #endif
 }
@@ -246,7 +244,7 @@ void release_jit_memory(jit_memory_region* region)
 
     if (region->dual_mapped && region->writable)
     {
-        mach_vm_deallocate(mach_task_self(), reinterpret_cast<mach_vm_address_t>(region->writable), static_cast<mach_vm_size_t>(region->size));
+        vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(region->writable), static_cast<vm_size_t>(region->size));
     }
     if (region->executable)
     {
@@ -306,7 +304,7 @@ jit_probe_result run_jit_execution_probe()
     result.return_value = function();
     result.succeeded = result.return_value == 42;
     result.detail = result.succeeded
-        ? std::string("Executable JIT probe returned 42 using ") + (region.dual_mapped ? "dual mappings." : "thread write protection.")
+        ? std::string("Executable JIT probe returned 42 using ") + (region.dual_mapped ? "dual mappings." : "a MAP_JIT mapping.")
         : "Executable JIT probe returned " + std::to_string(result.return_value) + ".";
 
     release_jit_memory(&region);

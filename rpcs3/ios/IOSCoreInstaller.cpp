@@ -1,5 +1,6 @@
 #include "IOSCoreInstaller.h"
 #include "IOSCoreEmulator.h"
+#include "IOSCoreInstallerSupport.h"
 #include "RPCS3Core.h"
 
 #include "Crypto/unpkg.h"
@@ -11,6 +12,7 @@
 #include "Loader/PUP.h"
 #include "Loader/TAR.h"
 #include "Utilities/File.h"
+#include "util/sysinfo.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -255,7 +257,7 @@ rpcs3_ios_core_result rpcs3_ios_core_install_firmware(
 
         fs::file version_file = pup.get_file(0x100);
         std::string version = version_file ? version_file.to_string() : std::string{};
-        if (const size_t newline = version.find('\n'); newline != std::string::npos)
+        if (const size_t newline = version.find_first_of("\r\n"); newline != std::string::npos)
         {
             version.erase(newline);
         }
@@ -265,7 +267,7 @@ rpcs3_ios_core_result rpcs3_ios_core_install_firmware(
             return RPCS3_IOS_CORE_PLATFORM_ERROR;
         }
 
-        const std::string installed_version = rpcs3::utils::get_firmware_version();
+        const std::string installed_version = utils::get_firmware_version();
         if (!installed_version.empty())
         {
             if (!overwrite_existing)
@@ -274,7 +276,7 @@ rpcs3_ios_core_result rpcs3_ios_core_install_firmware(
                     "Firmware " + installed_version + " is already installed. Enable overwrite to replace it.");
                 return RPCS3_IOS_CORE_BUSY;
             }
-            if (!allow_downgrade && version < installed_version)
+            if (!allow_downgrade && rpcs3::ios::firmware_version_less(version, installed_version))
             {
                 rpcs3::ios::set_core_last_error(
                     "Refusing to downgrade installed firmware " + installed_version + " to " + version + ".");
@@ -499,7 +501,7 @@ rpcs3_ios_core_result rpcs3_ios_core_install_package(
 
 size_t rpcs3_ios_core_copy_firmware_version(char* buffer, size_t buffer_size)
 {
-    g_firmware_version = rpcs3::utils::get_firmware_version();
+    g_firmware_version = utils::get_firmware_version();
     return copy_string(g_firmware_version, buffer, buffer_size);
 }
 

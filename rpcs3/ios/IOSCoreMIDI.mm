@@ -143,7 +143,7 @@ std::string serialize_assignments(const midi_assignments& assignments)
 
 void apply_assignments(const midi_assignments& assignments)
 {
-    g_cfg.io.midi_devices = serialize_assignments(assignments);
+    g_cfg.io.midi_devices.set(serialize_assignments(assignments));
 }
 
 bool mutation_allowed()

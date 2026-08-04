@@ -103,6 +103,20 @@ cmake -S "${SOURCE_DIR}" -B "${BUILD_DIR}" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0
 
+SDKROOT="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+xcrun --sdk iphonesimulator clang++ \
+    -std=c++23 \
+    -fobjc-arc \
+    -fblocks \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -target arm64-apple-ios16.0-simulator \
+    -isysroot "${SDKROOT}" \
+    -I"${ROOT}/rpcs3/ios" \
+    -fsyntax-only \
+    "${BUILD_DIR}/ios-generated/CoreLinkMainSafe.mm"
+
 test -s "${BUILD_DIR}/composition-manifest.txt"
 cat "${BUILD_DIR}/composition-manifest.txt"
 echo "RPCS3 iOS CMake composition contract passed."
