@@ -1,5 +1,6 @@
 #include "IOSCoreEmulator.h"
 #include "IOSCoreFallbackCallbacks.h"
+#include "IOSCoreInstaller.h"
 #include "IOSCoreLifecycle.h"
 #include "IOSCoreMIDI.h"
 #include "IOSCoreOperations.h"
@@ -63,7 +64,26 @@ rpcs3_ios_core_result rpcs3_ios_core_initialize(void)
     return run_core_operation(
         rpcs3::ios::core_operation::initialize,
         RPCS3_IOS_CORE_BUSY,
-        [] { return rpcs3_ios_core_initialize_base(); });
+        []
+        {
+            const rpcs3_ios_core_result result = rpcs3_ios_core_initialize_base();
+            if (result != RPCS3_IOS_CORE_SUCCESS)
+            {
+                return result;
+            }
+
+            std::string recovery_error;
+            if (!rpcs3::ios::recover_core_firmware_transaction(&recovery_error))
+            {
+                (void)rpcs3_ios_core_shutdown_base();
+                rpcs3::ios::set_core_last_error(
+                    recovery_error.empty()
+                        ? "An interrupted firmware transaction could not be recovered."
+                        : std::move(recovery_error));
+                return RPCS3_IOS_CORE_PLATFORM_ERROR;
+            }
+            return RPCS3_IOS_CORE_SUCCESS;
+        });
 }
 
 rpcs3_ios_core_result rpcs3_ios_core_shutdown(void)
