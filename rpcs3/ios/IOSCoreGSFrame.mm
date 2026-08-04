@@ -7,6 +7,7 @@
 #include "Emu/RSX/GSFrameBase.h"
 
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -15,6 +16,11 @@ namespace
 {
 std::mutex g_render_view_mutex;
 __strong UIView* g_render_view = nil;
+std::atomic<int> g_render_width = 1;
+std::atomic<int> g_render_height = 1;
+std::atomic<double> g_render_refresh_rate = 60.0;
+std::atomic<std::uint64_t> g_render_generation = 0;
+std::atomic_bool g_render_visible = false;
 
 void run_on_main_sync(dispatch_block_t block)
 {
@@ -46,21 +52,49 @@ CGFloat scale_for_view(UIView* view)
     return std::max<CGFloat>(screen.nativeScale, 1.0);
 }
 
+void clear_render_metrics()
+{
+    g_render_width.store(1, std::memory_order_release);
+    g_render_height.store(1, std::memory_order_release);
+    g_render_refresh_rate.store(60.0, std::memory_order_release);
+    g_render_visible.store(false, std::memory_order_release);
+    g_render_generation.fetch_add(1, std::memory_order_acq_rel);
+}
+
 void update_metal_drawable(UIView* view)
 {
     if (!view || ![view.layer isKindOfClass:CAMetalLayer.class])
     {
+        clear_render_metrics();
         return;
     }
 
     CAMetalLayer* layer = (CAMetalLayer*)view.layer;
     const CGFloat scale = scale_for_view(view);
+    const int width = std::max(1, static_cast<int>(view.bounds.size.width * scale));
+    const int height = std::max(1, static_cast<int>(view.bounds.size.height * scale));
+    UIScreen* screen = view.window.screen ?: UIScreen.mainScreen;
+    const double refresh_rate = std::max<NSInteger>(screen.maximumFramesPerSecond, 20);
+    const bool visible = !view.hidden && view.window != nil;
+
     layer.framebufferOnly = NO;
     layer.opaque = YES;
     layer.contentsScale = scale;
-    layer.drawableSize = CGSizeMake(
-        std::max<CGFloat>(view.bounds.size.width * scale, 1.0),
-        std::max<CGFloat>(view.bounds.size.height * scale, 1.0));
+    layer.drawableSize = CGSizeMake(width, height);
+
+    const bool size_changed =
+        g_render_width.exchange(width, std::memory_order_acq_rel) != width ||
+        g_render_height.exchange(height, std::memory_order_acq_rel) != height;
+    const bool rate_changed =
+        g_render_refresh_rate.exchange(refresh_rate, std::memory_order_acq_rel) != refresh_rate;
+    g_render_visible.store(visible, std::memory_order_release);
+    if (size_changed || rate_changed)
+    {
+        // RSX-facing dimensions are now available without entering UIKit. The
+        // generation lets diagnostics and future swapchain code distinguish a
+        // new drawable contract from a repeated layout refresh.
+        g_render_generation.fetch_add(1, std::memory_order_acq_rel);
+    }
 }
 
 class ios_core_gs_frame final : public GSFrameBase
@@ -85,24 +119,25 @@ public:
 
     bool shown() override
     {
-        __strong UIView* view = m_view;
-        __block bool visible = false;
-        run_on_main_sync(^{
-            visible = view && !view.hidden && view.window != nil;
-        });
-        return visible;
+        return g_render_visible.load(std::memory_order_acquire);
     }
 
     void hide() override
     {
         __strong UIView* view = m_view;
-        run_on_main_async(^{ view.hidden = YES; });
+        run_on_main_async(^{
+            view.hidden = YES;
+            g_render_visible.store(false, std::memory_order_release);
+        });
     }
 
     void show() override
     {
         __strong UIView* view = m_view;
-        run_on_main_async(^{ view.hidden = NO; });
+        run_on_main_async(^{
+            view.hidden = NO;
+            update_metal_drawable(view);
+        });
     }
 
     void toggle_fullscreen() override
@@ -134,33 +169,17 @@ public:
 
     int client_width() override
     {
-        __strong UIView* view = m_view;
-        __block int width = 1;
-        run_on_main_sync(^{
-            width = std::max(1, static_cast<int>(view.bounds.size.width * scale_for_view(view)));
-        });
-        return width;
+        return g_render_width.load(std::memory_order_acquire);
     }
 
     int client_height() override
     {
-        __strong UIView* view = m_view;
-        __block int height = 1;
-        run_on_main_sync(^{
-            height = std::max(1, static_cast<int>(view.bounds.size.height * scale_for_view(view)));
-        });
-        return height;
+        return g_render_height.load(std::memory_order_acquire);
     }
 
     f64 client_display_rate() override
     {
-        __strong UIView* view = m_view;
-        __block f64 rate = 60.0;
-        run_on_main_sync(^{
-            UIScreen* screen = view.window.screen ?: UIScreen.mainScreen;
-            rate = std::max<NSInteger>(screen.maximumFramesPerSecond, 20);
-        });
-        return rate;
+        return g_render_refresh_rate.load(std::memory_order_acquire);
     }
 
     bool has_alpha() override
@@ -245,11 +264,14 @@ bool set_core_render_view(void* native_view, std::string* error)
         g_render_view = view;
     }
 
-    if (previous_view && previous_view != view)
-    {
-        detach_touch_controller_overlay((__bridge void*)previous_view);
-    }
-    attach_touch_controller_overlay((__bridge void*)view);
+    run_on_main_async(^{
+        if (previous_view && previous_view != view)
+        {
+            detach_touch_controller_overlay((__bridge void*)previous_view);
+        }
+        attach_touch_controller_overlay((__bridge void*)view);
+        update_metal_drawable(view);
+    });
     return true;
 }
 
@@ -261,9 +283,10 @@ void clear_core_render_view()
         view = g_render_view;
         g_render_view = nil;
     }
+    clear_render_metrics();
     if (view)
     {
-        detach_touch_controller_overlay((__bridge void*)view);
+        run_on_main_async(^{ detach_touch_controller_overlay((__bridge void*)view); });
     }
 }
 
@@ -284,6 +307,17 @@ void refresh_core_render_view()
     {
         run_on_main_async(^{ update_metal_drawable(view); });
     }
+}
+
+core_render_metrics get_core_render_metrics()
+{
+    return {
+        g_render_width.load(std::memory_order_acquire),
+        g_render_height.load(std::memory_order_acquire),
+        g_render_refresh_rate.load(std::memory_order_acquire),
+        g_render_generation.load(std::memory_order_acquire),
+        g_render_visible.load(std::memory_order_acquire),
+    };
 }
 
 std::unique_ptr<GSFrameBase> make_core_gs_frame()
