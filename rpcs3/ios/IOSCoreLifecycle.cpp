@@ -23,24 +23,13 @@ bool pause_required()
     return g_pause_reasons.load(std::memory_order_acquire) != 0;
 }
 
-void perform_pause_if_needed()
-{
-    if (!pause_required() ||
-        rpcs3_ios_core_emulator_state() != RPCS3_IOS_EMULATOR_RUNNING)
-    {
-        return;
-    }
-
-    if (rpcs3_ios_core_pause() == RPCS3_IOS_CORE_SUCCESS)
-    {
-        g_core_performed_pause.store(true, std::memory_order_release);
-    }
-}
-
 void pause_for_reason(unsigned int reason)
 {
     g_pause_reasons.fetch_or(reason, std::memory_order_acq_rel);
-    perform_pause_if_needed();
+    if (!rpcs3::ios::try_core_lifecycle_pause_after_run())
+    {
+        rpcs3::ios::schedule_core_lifecycle_pause_after_run();
+    }
 }
 
 void resume_after_reason(unsigned int reason)
@@ -50,14 +39,10 @@ void resume_after_reason(unsigned int reason)
     {
         return;
     }
-    if (!g_core_performed_pause.exchange(false, std::memory_order_acq_rel))
-    {
-        return;
-    }
 
-    if (rpcs3_ios_core_emulator_state() == RPCS3_IOS_EMULATOR_PAUSED)
+    if (!rpcs3::ios::try_core_lifecycle_resume_after_reasons())
     {
-        (void)rpcs3_ios_core_resume();
+        rpcs3::ios::schedule_core_lifecycle_resume_after_reasons();
     }
 }
 }
@@ -135,6 +120,8 @@ bool try_core_lifecycle_pause_after_run()
     const rpcs3_ios_emulator_state state = rpcs3_ios_core_emulator_state();
     if (state == RPCS3_IOS_EMULATOR_PAUSED)
     {
+        // A manual pause already satisfies the lifecycle requirement. Do not
+        // claim ownership because the lifecycle layer must not resume it later.
         return true;
     }
     if (state == RPCS3_IOS_EMULATOR_STOPPED || state == RPCS3_IOS_EMULATOR_UNAVAILABLE)
@@ -152,6 +139,53 @@ bool try_core_lifecycle_pause_after_run()
         g_core_performed_pause.store(true, std::memory_order_release);
         return true;
     }
+
+    // BUSY means another admitted operation briefly won the gate. Retry after
+    // it leaves instead of losing the inactive/audio pause request.
     return result != RPCS3_IOS_CORE_BUSY;
+}
+
+bool try_core_lifecycle_resume_after_reasons()
+{
+    if (pause_required())
+    {
+        return true;
+    }
+    if (!g_core_performed_pause.load(std::memory_order_acquire))
+    {
+        return true;
+    }
+
+    const rpcs3_ios_emulator_state state = rpcs3_ios_core_emulator_state();
+    if (state == RPCS3_IOS_EMULATOR_RUNNING ||
+        state == RPCS3_IOS_EMULATOR_STOPPED ||
+        state == RPCS3_IOS_EMULATOR_UNAVAILABLE)
+    {
+        // The title was resumed or stopped independently. Release only the
+        // lifecycle layer's ownership marker; never force another transition.
+        g_core_performed_pause.store(false, std::memory_order_release);
+        return true;
+    }
+    if (state != RPCS3_IOS_EMULATOR_PAUSED)
+    {
+        return false;
+    }
+
+    const rpcs3_ios_core_result result = rpcs3_ios_core_resume();
+    if (result == RPCS3_IOS_CORE_SUCCESS)
+    {
+        g_core_performed_pause.store(false, std::memory_order_release);
+        return true;
+    }
+
+    // Keep ownership while admission is BUSY so the next retry can complete the
+    // matching resume. A permanent error stops the bounded retry chain without
+    // falsely claiming that a future lifecycle event still owns the pause.
+    if (result != RPCS3_IOS_CORE_BUSY)
+    {
+        g_core_performed_pause.store(false, std::memory_order_release);
+        return true;
+    }
+    return false;
 }
 }
