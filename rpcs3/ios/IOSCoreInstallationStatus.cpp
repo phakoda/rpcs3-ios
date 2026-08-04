@@ -4,6 +4,7 @@
 #include "RPCS3CoreStatus.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <string>
