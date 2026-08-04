@@ -22,6 +22,7 @@ typedef enum rpcs3_ios_core_operation_kind
     RPCS3_IOS_CORE_OPERATION_SETTINGS = 11,
     RPCS3_IOS_CORE_OPERATION_MIDI = 12,
     RPCS3_IOS_CORE_OPERATION_RENDER_HOST = 13,
+    RPCS3_IOS_CORE_OPERATION_IMPORT = 14,
 } rpcs3_ios_core_operation_kind;
 
 typedef enum rpcs3_ios_installation_terminal_state
