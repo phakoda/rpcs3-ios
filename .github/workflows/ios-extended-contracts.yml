@@ -1,0 +1,58 @@
+name: iOS extended contracts
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ios-extended-contracts.yml'
+      - 'buildfiles/ios/run_extended_contract_tests.sh'
+      - 'buildfiles/ios/tests/test_public_abi.cpp'
+      - 'buildfiles/ios/tests/test_installer_support.cpp'
+      - 'rpcs3/ios/IOSCoreInstallerSupport.*'
+      - 'rpcs3/ios/RPCS3Core.h'
+      - 'rpcs3/ios/RPCS3CoreStatus.h'
+  push:
+    branches:
+      - 'agent/ios-bootstrap'
+    paths:
+      - '.github/workflows/ios-extended-contracts.yml'
+      - 'buildfiles/ios/run_extended_contract_tests.sh'
+      - 'buildfiles/ios/tests/test_public_abi.cpp'
+      - 'buildfiles/ios/tests/test_installer_support.cpp'
+      - 'rpcs3/ios/IOSCoreInstallerSupport.*'
+      - 'rpcs3/ios/RPCS3Core.h'
+      - 'rpcs3/ios/RPCS3CoreStatus.h'
+
+permissions:
+  contents: read
+
+jobs:
+  linux-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Run executable ABI and installer policy tests
+        shell: bash
+        run: bash buildfiles/ios/run_extended_contract_tests.sh
+
+  apple-header-contracts:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Compile ABI contract for arm64 iOS simulator
+        shell: bash
+        run: |
+          SDKROOT="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          xcrun --sdk iphonesimulator clang++ \
+            -std=c++20 \
+            -Wall -Wextra -Wpedantic -Werror \
+            -target arm64-apple-ios16.0-simulator \
+            -isysroot "${SDKROOT}" \
+            -Irpcs3/ios \
+            -fsyntax-only \
+            buildfiles/ios/tests/test_public_abi.cpp \
+            rpcs3/ios/IOSCoreInstallerSupport.cpp \
+            buildfiles/ios/tests/test_installer_support.cpp
