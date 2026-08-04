@@ -85,8 +85,8 @@ set(_timer_replacement [=[    rpcs3_ios_core_set_event_callback(core_event_callb
 
     __weak RPCS3CoreLinkViewController* weak_self = self;
     _statusTimer = [NSTimer scheduledTimerWithTimeInterval:0.5
-+        repeats:YES
-+          block:^(NSTimer*) { [weak_self refreshStatus]; }];
+        repeats:YES
+          block:^(NSTimer*) { [weak_self refreshStatus]; }];
 }]=])
 string(REPLACE "${_timer_anchor}" "${_timer_replacement}"
     _core_host_contents "${_core_host_contents}")
