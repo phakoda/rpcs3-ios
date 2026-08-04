@@ -1,6 +1,7 @@
 #include "IOSCoreEmulator.h"
 #include "IOSCoreFallbackCallbacks.h"
 #include "IOSCoreLifecycle.h"
+#include "IOSCoreMIDI.h"
 #include "IOSCoreOperations.h"
 #include "RPCS3Core.h"
 
@@ -68,6 +69,7 @@ rpcs3_ios_core_result rpcs3_ios_core_shutdown(void)
         []
         {
             rpcs3::ios::shutdown_core_fallback_services();
+            rpcs3::ios::shutdown_core_midi_identity();
             return rpcs3_ios_core_shutdown_base();
         });
 }
