@@ -6,6 +6,8 @@
 #include <atomic>
 #include <string>
 
+extern "C" rpcs3_ios_core_result rpcs3_ios_core_pause_base(void);
+
 namespace
 {
 enum core_pause_reason : unsigned int
@@ -18,7 +20,7 @@ std::atomic_uint g_pause_reasons = 0;
 std::atomic_bool g_core_performed_pause = false;
 std::atomic_bool g_application_active = true;
 
-void perform_pause_if_needed()
+void perform_pause_if_needed(bool during_boot_transition = false)
 {
     if (g_pause_reasons.load(std::memory_order_acquire) == 0 ||
         rpcs3_ios_core_emulator_state() != RPCS3_IOS_EMULATOR_RUNNING)
@@ -26,7 +28,10 @@ void perform_pause_if_needed()
         return;
     }
 
-    if (rpcs3_ios_core_pause() == RPCS3_IOS_CORE_SUCCESS)
+    const rpcs3_ios_core_result result = during_boot_transition
+        ? rpcs3_ios_core_pause_base()
+        : rpcs3_ios_core_pause();
+    if (result == RPCS3_IOS_CORE_SUCCESS)
     {
         g_core_performed_pause.store(true, std::memory_order_release);
     }
@@ -112,6 +117,8 @@ bool core_lifecycle_allows_boot()
 
 void enforce_core_lifecycle_pause_after_run()
 {
-    perform_pause_if_needed();
+    // on_run can execute while the public boot operation still owns admission.
+    // Use the already-serialized base pause path rather than reentering the gate.
+    perform_pause_if_needed(true);
 }
 }
