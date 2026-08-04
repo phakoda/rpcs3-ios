@@ -6,8 +6,6 @@
 #include <atomic>
 #include <string>
 
-extern "C" rpcs3_ios_core_result rpcs3_ios_core_pause_base(void);
-
 namespace
 {
 enum core_pause_reason : unsigned int
@@ -20,18 +18,20 @@ std::atomic_uint g_pause_reasons = 0;
 std::atomic_bool g_core_performed_pause = false;
 std::atomic_bool g_application_active = true;
 
-void perform_pause_if_needed(bool during_boot_transition = false)
+bool pause_required()
 {
-    if (g_pause_reasons.load(std::memory_order_acquire) == 0 ||
+    return g_pause_reasons.load(std::memory_order_acquire) != 0;
+}
+
+void perform_pause_if_needed()
+{
+    if (!pause_required() ||
         rpcs3_ios_core_emulator_state() != RPCS3_IOS_EMULATOR_RUNNING)
     {
         return;
     }
 
-    const rpcs3_ios_core_result result = during_boot_transition
-        ? rpcs3_ios_core_pause_base()
-        : rpcs3_ios_core_pause();
-    if (result == RPCS3_IOS_CORE_SUCCESS)
+    if (rpcs3_ios_core_pause() == RPCS3_IOS_CORE_SUCCESS)
     {
         g_core_performed_pause.store(true, std::memory_order_release);
     }
@@ -111,14 +111,47 @@ void remove_core_lifecycle_callbacks()
 
 bool core_lifecycle_allows_boot()
 {
-    return g_application_active.load(std::memory_order_acquire) &&
-        g_pause_reasons.load(std::memory_order_acquire) == 0;
+    return g_application_active.load(std::memory_order_acquire) && !pause_required();
 }
 
 void enforce_core_lifecycle_pause_after_run()
 {
-    // on_run can execute while the public boot operation still owns admission.
-    // Use the already-serialized base pause path rather than reentering the gate.
-    perform_pause_if_needed(true);
+    // BootGame may invoke on_run while holding the emulator API mutex. Defer the
+    // pause request so it can acquire public operation admission after boot
+    // leaves that critical section instead of recursively locking the mutex.
+    if (pause_required())
+    {
+        schedule_core_lifecycle_pause_after_run();
+    }
+}
+
+bool try_core_lifecycle_pause_after_run()
+{
+    if (!pause_required())
+    {
+        return true;
+    }
+
+    const rpcs3_ios_emulator_state state = rpcs3_ios_core_emulator_state();
+    if (state == RPCS3_IOS_EMULATOR_PAUSED)
+    {
+        return true;
+    }
+    if (state == RPCS3_IOS_EMULATOR_STOPPED || state == RPCS3_IOS_EMULATOR_UNAVAILABLE)
+    {
+        return true;
+    }
+    if (state != RPCS3_IOS_EMULATOR_RUNNING)
+    {
+        return false;
+    }
+
+    const rpcs3_ios_core_result result = rpcs3_ios_core_pause();
+    if (result == RPCS3_IOS_CORE_SUCCESS)
+    {
+        g_core_performed_pause.store(true, std::memory_order_release);
+        return true;
+    }
+    return result != RPCS3_IOS_CORE_BUSY;
 }
 }
