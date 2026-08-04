@@ -1,0 +1,67 @@
+name: iOS artifact script contracts
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ios-artifact-script-contracts.yml'
+      - 'buildfiles/ios/verify_artifacts.sh'
+      - 'buildfiles/ios/verify_core_framework.sh'
+      - 'buildfiles/ios/verify_core_xcframework.sh'
+      - 'buildfiles/ios/verify_core_app.sh'
+      - 'buildfiles/ios/verify_dependency_archives.sh'
+      - 'IOS_ARTIFACT_VERIFICATION.md'
+  push:
+    branches:
+      - 'agent/ios-bootstrap'
+    paths:
+      - '.github/workflows/ios-artifact-script-contracts.yml'
+      - 'buildfiles/ios/verify_artifacts.sh'
+      - 'buildfiles/ios/verify_core_framework.sh'
+      - 'buildfiles/ios/verify_core_xcframework.sh'
+      - 'buildfiles/ios/verify_core_app.sh'
+      - 'buildfiles/ios/verify_dependency_archives.sh'
+      - 'IOS_ARTIFACT_VERIFICATION.md'
+
+permissions:
+  contents: read
+
+jobs:
+  shell-contracts:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Validate shell syntax
+        shell: bash
+        run: |
+          bash -n buildfiles/ios/verify_artifacts.sh
+          bash -n buildfiles/ios/verify_core_framework.sh
+          bash -n buildfiles/ios/verify_core_xcframework.sh
+          bash -n buildfiles/ios/verify_core_app.sh
+          bash -n buildfiles/ios/verify_dependency_archives.sh
+      - name: Verify required Apple inspection tools
+        shell: bash
+        run: |
+          command -v plutil
+          command -v lipo
+          command -v nm
+          command -v otool
+          command -v codesign
+          xcrun --find vtool
+          /usr/libexec/PlistBuddy -h >/dev/null 2>&1 || true
+      - name: Ensure scripts reject missing artifacts
+        shell: bash
+        run: |
+          if buildfiles/ios/verify_artifacts.sh framework /does/not/exist; then
+            echo 'error: missing framework unexpectedly passed verification' >&2
+            exit 1
+          fi
+          if buildfiles/ios/verify_artifacts.sh xcframework /does/not/exist; then
+            echo 'error: missing XCFramework unexpectedly passed verification' >&2
+            exit 1
+          fi
+          if buildfiles/ios/verify_artifacts.sh app /does/not/exist; then
+            echo 'error: missing app unexpectedly passed verification' >&2
+            exit 1
+          fi
