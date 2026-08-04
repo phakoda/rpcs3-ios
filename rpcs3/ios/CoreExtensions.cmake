@@ -7,6 +7,7 @@ if(NOT RPCS3_IOS)
 endif()
 
 if(TARGET rpcs3_ios_core_framework)
+    set(_rpcs3_ios_core_api "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.mm")
     set(_rpcs3_ios_core_callbacks "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacks.mm")
     set(_rpcs3_ios_core_emulator "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreEmulator.mm")
     set(_rpcs3_ios_core_installer "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstaller.cpp")
@@ -14,10 +15,14 @@ if(TARGET rpcs3_ios_core_framework)
     # Compile broad implementations under private base names. Small composition
     # units then install contract-specific behavior without rewriting the larger
     # emulator, installer, and UIKit callback translation units.
+    set_source_files_properties("${_rpcs3_ios_core_api}" PROPERTIES
+        COMPILE_DEFINITIONS
+            "rpcs3_ios_core_initialize=rpcs3_ios_core_initialize_base;rpcs3_ios_core_shutdown=rpcs3_ios_core_shutdown_base;rpcs3_ios_core_set_render_view=rpcs3_ios_core_set_render_view_base;rpcs3_ios_core_clear_render_view=rpcs3_ios_core_clear_render_view_base")
     set_source_files_properties("${_rpcs3_ios_core_callbacks}" PROPERTIES
         COMPILE_DEFINITIONS "extend_core_callbacks=extend_core_callbacks_base")
     set_source_files_properties("${_rpcs3_ios_core_emulator}" PROPERTIES
-        COMPILE_DEFINITIONS "rpcs3_ios_core_set_event_callback=rpcs3_ios_core_set_event_callback_base")
+        COMPILE_DEFINITIONS
+            "rpcs3_ios_core_set_event_callback=rpcs3_ios_core_set_event_callback_base;rpcs3_ios_core_boot_path=rpcs3_ios_core_boot_path_base;rpcs3_ios_core_pause=rpcs3_ios_core_pause_base;rpcs3_ios_core_resume=rpcs3_ios_core_resume_base;rpcs3_ios_core_stop=rpcs3_ios_core_stop_base;rpcs3_ios_core_restart=rpcs3_ios_core_restart_base")
     set_source_files_properties("${_rpcs3_ios_core_installer}" PROPERTIES
         COMPILE_DEFINITIONS
             "rpcs3_ios_core_install_firmware=rpcs3_ios_core_install_firmware_base;rpcs3_ios_core_install_package=rpcs3_ios_core_install_package_base;rpcs3_ios_core_request_installation_cancel=rpcs3_ios_core_request_installation_cancel_base")
@@ -25,6 +30,7 @@ if(TARGET rpcs3_ios_core_framework)
     target_sources(rpcs3_ios_core_framework PRIVATE
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreOperations.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreOperations.cpp"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreOperationAPI.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacks.h"
         "${_rpcs3_ios_core_callbacks}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacksComposite.cpp"
