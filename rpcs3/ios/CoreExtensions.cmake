@@ -11,6 +11,9 @@ if(TARGET rpcs3_ios_core_framework)
     set(_rpcs3_ios_core_callbacks "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacks.mm")
     set(_rpcs3_ios_core_emulator "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreEmulator.mm")
     set(_rpcs3_ios_core_installer "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstaller.cpp")
+    set(_rpcs3_ios_core_library "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreLibrary.mm")
+    set(_rpcs3_ios_core_settings "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreSettings.mm")
+    set(_rpcs3_ios_core_midi "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreMIDI.mm")
 
     # Compile broad implementations under private base names. Small composition
     # units then install contract-specific behavior without rewriting the larger
@@ -26,11 +29,21 @@ if(TARGET rpcs3_ios_core_framework)
     set_source_files_properties("${_rpcs3_ios_core_installer}" PROPERTIES
         COMPILE_DEFINITIONS
             "rpcs3_ios_core_install_firmware=rpcs3_ios_core_install_firmware_base;rpcs3_ios_core_install_package=rpcs3_ios_core_install_package_base;rpcs3_ios_core_request_installation_cancel=rpcs3_ios_core_request_installation_cancel_base")
+    set_source_files_properties("${_rpcs3_ios_core_library}" PROPERTIES
+        COMPILE_DEFINITIONS
+            "rpcs3_ios_core_add_game_directory=rpcs3_ios_core_add_game_directory_base;rpcs3_ios_core_remove_game_directory=rpcs3_ios_core_remove_game_directory_base;rpcs3_ios_core_rescan_game_directories=rpcs3_ios_core_rescan_game_directories_base;rpcs3_ios_core_prune_missing_game_directories=rpcs3_ios_core_prune_missing_game_directories_base;rpcs3_ios_core_clear_game_directories=rpcs3_ios_core_clear_game_directories_base;rpcs3_ios_core_add_game=rpcs3_ios_core_add_game_base;rpcs3_ios_core_remove_game=rpcs3_ios_core_remove_game_base")
+    set_source_files_properties("${_rpcs3_ios_core_settings}" PROPERTIES
+        COMPILE_DEFINITIONS
+            "rpcs3_ios_core_set_configuration=rpcs3_ios_core_set_configuration_base;rpcs3_ios_core_reset_configuration=rpcs3_ios_core_reset_configuration_base")
+    set_source_files_properties("${_rpcs3_ios_core_midi}" PROPERTIES
+        COMPILE_DEFINITIONS
+            "rpcs3_ios_core_set_midi_assignment=rpcs3_ios_core_set_midi_assignment_base;rpcs3_ios_core_clear_midi_assignment=rpcs3_ios_core_clear_midi_assignment_base;rpcs3_ios_core_clear_all_midi_assignments=rpcs3_ios_core_clear_all_midi_assignments_base")
 
     target_sources(rpcs3_ios_core_framework PRIVATE
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreOperations.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreOperations.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreOperationAPI.cpp"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreMutationAPI.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacks.h"
         "${_rpcs3_ios_core_callbacks}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacksComposite.cpp"
@@ -42,10 +55,10 @@ if(TARGET rpcs3_ios_core_framework)
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreSaveDialog.h"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreSaveDialog.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreSettings.h"
-        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreSettings.mm"
+        "${_rpcs3_ios_core_settings}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreMIDI.h"
-        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreMIDI.mm"
-        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreLibrary.mm"
+        "${_rpcs3_ios_core_midi}"
+        "${_rpcs3_ios_core_library}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstaller.h"
         "${_rpcs3_ios_core_installer}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstallationStatus.cpp")
