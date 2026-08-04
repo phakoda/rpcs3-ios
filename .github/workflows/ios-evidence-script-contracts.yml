@@ -1,0 +1,53 @@
+name: iOS evidence script contracts
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ios-evidence-script-contracts.yml'
+      - 'buildfiles/ios/write_build_manifest.sh'
+      - 'buildfiles/ios/capture_build_evidence.sh'
+      - 'IOS_BUILD_EVIDENCE.md'
+  push:
+    branches:
+      - 'agent/ios-bootstrap'
+    paths:
+      - '.github/workflows/ios-evidence-script-contracts.yml'
+      - 'buildfiles/ios/write_build_manifest.sh'
+      - 'buildfiles/ios/capture_build_evidence.sh'
+      - 'IOS_BUILD_EVIDENCE.md'
+
+permissions:
+  contents: read
+
+jobs:
+  evidence-contracts:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Validate shell syntax
+        shell: bash
+        run: |
+          bash -n buildfiles/ios/write_build_manifest.sh
+          bash -n buildfiles/ios/capture_build_evidence.sh
+      - name: Generate source-only manifest fixture
+        shell: bash
+        run: |
+          mkdir -p evidence-fixture
+          buildfiles/ios/write_build_manifest.sh \
+            evidence-fixture/manifest.txt \
+            rpcs3/ios/RPCS3Core.h \
+            rpcs3/ios/RPCS3CoreStatus.h
+          grep -Fq 'RPCS3 iOS build evidence manifest' evidence-fixture/manifest.txt
+          grep -Fq 'commit=' evidence-fixture/manifest.txt
+          grep -Fq '[toolchain]' evidence-fixture/manifest.txt
+          grep -Fq '[inputs-and-products]' evidence-fixture/manifest.txt
+          test "$(grep -c '^sha256=' evidence-fixture/manifest.txt)" -eq 2
+      - name: Archive manifest fixture
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-manifest-fixture
+          path: evidence-fixture
+          if-no-files-found: error
+          retention-days: 14
