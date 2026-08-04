@@ -107,3 +107,98 @@ jobs:
             fi
           done
           exit "$failed"
+
+  apple-sdk-contracts:
+    name: Apple SDK syntax contracts
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Prepare contract consumers
+        shell: bash
+        run: |
+          mkdir -p apple-contracts
+          cat > apple-contracts/public-c.c <<'EOF'
+          #include "RPCS3Core.h"
+          #include "RPCS3CoreStatus.h"
+          int main(void)
+          {
+              rpcs3_ios_configuration configuration = {0};
+              rpcs3_ios_core_operation_status operation = rpcs3_ios_core_query_operation_status();
+              rpcs3_ios_installation_status_v2 installation = rpcs3_ios_core_query_installation_status_v2();
+              rpcs3_ios_core_capabilities capabilities = rpcs3_ios_core_query_capabilities();
+              return (int)(configuration.struct_size + operation.active_operation +
+                  installation.terminal_state + capabilities.api_minor);
+          }
+          EOF
+          cat > apple-contracts/public-cxx.cpp <<'EOF'
+          #include "RPCS3Core.h"
+          #include "RPCS3CoreStatus.h"
+          #include <type_traits>
+          static_assert(std::is_standard_layout_v<rpcs3_ios_configuration>);
+          static_assert(std::is_standard_layout_v<rpcs3_ios_installation_status_v2>);
+          int main()
+          {
+              return static_cast<int>(rpcs3_ios_core_midi_topology_generation());
+          }
+          EOF
+          cat > apple-contracts/public-objcxx.mm <<'EOF'
+          #import <UIKit/UIKit.h>
+          #include "RPCS3Core.h"
+          #include "RPCS3CoreStatus.h"
+          static void attach(UIView* view)
+          {
+              (void)rpcs3_ios_core_set_render_view((__bridge void*)view);
+              (void)rpcs3_ios_core_query_capabilities();
+          }
+          int main()
+          {
+              @autoreleasepool { attach([[UIView alloc] init]); }
+              return 0;
+          }
+          EOF
+
+      - name: Lint Apple property lists
+        shell: bash
+        run: |
+          plutil -lint rpcs3/ios/Info.plist.in
+          plutil -lint rpcs3/ios/RPCS3Core-Info.plist.in
+
+      - name: Compile public header consumers
+        shell: bash
+        run: |
+          TARGET=arm64-apple-ios16.0-simulator
+          SDKROOT="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          COMMON=(-target "$TARGET" -isysroot "$SDKROOT" -Irpcs3/ios -fsyntax-only)
+          xcrun --sdk iphonesimulator clang -std=c17 "${COMMON[@]}" apple-contracts/public-c.c
+          xcrun --sdk iphonesimulator clang++ -std=c++20 "${COMMON[@]}" apple-contracts/public-cxx.cpp
+          xcrun --sdk iphonesimulator clang++ -std=c++20 -fobjc-arc -fblocks "${COMMON[@]}" apple-contracts/public-objcxx.mm
+
+      - name: Compile standalone Apple integration sources
+        shell: bash
+        run: |
+          TARGET=arm64-apple-ios16.0-simulator
+          SDKROOT="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          COMMON=(-std=c++20 -target "$TARGET" -isysroot "$SDKROOT" -fsyntax-only)
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" \
+            -I3rdparty/ios/rtmidi/include \
+            3rdparty/ios/rtmidi/rtmidi_coremidi_v2.cpp
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" -fobjc-arc -fblocks -Irpcs3/ios \
+            rpcs3/ios/IOSCoreLifecycleDeferred.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" -fobjc-arc -fblocks -Irpcs3/ios \
+            rpcs3/ios/IOSCoreMIDIComposition.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" -fobjc-arc -fblocks -Irpcs3/ios \
+            rpcs3/ios/IOSCoreMIDIIdentity.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" -fobjc-arc -fblocks -Irpcs3/ios \
+            rpcs3/ios/IOSCoreOpenURL.mm
+
+      - name: Upload Apple syntax logs and consumers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-apple-sdk-contracts
+          path: apple-contracts
+          if-no-files-found: error
+          retention-days: 14
