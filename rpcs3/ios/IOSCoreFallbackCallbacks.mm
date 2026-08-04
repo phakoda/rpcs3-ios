@@ -6,11 +6,14 @@
 #include "Emu/System.h"
 
 #include <algorithm>
+#include <atomic>
 #include <optional>
 #include <string>
 
 namespace
 {
+std::atomic_bool g_accept_sounds = false;
+
 NSString* ns_utf8(const std::string& value)
 {
     return [[NSString alloc] initWithBytes:value.data()
@@ -46,6 +49,7 @@ std::u32string utf32_string(NSString* value)
 @property(nonatomic, strong) NSMutableSet<AVAudioPlayer*>* players;
 + (instancetype)sharedPool;
 - (void)playPath:(NSString*)path volume:(float)volume;
+- (void)stopAll;
 @end
 
 @implementation RPCS3CoreSoundPool
@@ -63,15 +67,21 @@ std::u32string utf32_string(NSString* value)
 
 - (void)playPath:(NSString*)path volume:(float)volume
 {
-    if (!path.length)
+    if (!path.length || !g_accept_sounds.load(std::memory_order_acquire))
     {
         return;
     }
 
+    // Avoid retaining an unbounded number of overlapping guest UI sounds.
+    if (self.players.count >= 16)
+    {
+        [self stopAll];
+    }
+
     NSError* error = nil;
     AVAudioPlayer* player = [[AVAudioPlayer alloc]
-        initWithContentsOfURL:[NSURL fileURLWithPath:path]
-                        error:&error];
++        initWithContentsOfURL:[NSURL fileURLWithPath:path]
++                        error:&error];
     if (!player)
     {
         NSLog(@"RPCS3Core could not play sound %@: %@", path, error.localizedDescription);
@@ -84,19 +94,32 @@ std::u32string utf32_string(NSString* value)
     [player prepareToPlay];
     if (![player play])
     {
+        player.delegate = nil;
         [self.players removeObject:player];
     }
+}
+
+- (void)stopAll
+{
+    for (AVAudioPlayer* player in self.players.copy)
+    {
+        player.delegate = nil;
+        [player stop];
+    }
+    [self.players removeAllObjects];
 }
 
 - (void)audioPlayerDidFinishPlaying:(AVAudioPlayer*)player successfully:(BOOL)flag
 {
     (void)flag;
+    player.delegate = nil;
     [self.players removeObject:player];
 }
 
 - (void)audioPlayerDecodeErrorDidOccur:(AVAudioPlayer*)player error:(NSError*)error
 {
     NSLog(@"RPCS3Core sound decode failed: %@", error.localizedDescription);
+    player.delegate = nil;
     [self.players removeObject:player];
 }
 
@@ -106,6 +129,8 @@ namespace rpcs3::ios
 {
 void extend_core_fallback_callbacks(EmuCallbacks& callbacks)
 {
+    g_accept_sounds.store(true, std::memory_order_release);
+
     callbacks.get_localized_string = [](localized_string_id, const char* fallback)
     {
         return fallback ? std::string(fallback) : std::string{};
@@ -128,5 +153,23 @@ void extend_core_fallback_callbacks(EmuCallbacks& callbacks)
             [[RPCS3CoreSoundPool sharedPool] playPath:sound_path volume:sound_volume];
         });
     };
+}
+
+void shutdown_core_fallback_services()
+{
+    g_accept_sounds.store(false, std::memory_order_release);
+    const dispatch_block_t stop = ^{
+        [[RPCS3CoreSoundPool sharedPool] stopAll];
+    };
+    if (NSThread.isMainThread)
+    {
+        stop();
+    }
+    else
+    {
+        // Sound pool access is confined to the main queue. Do not synchronously
+        // enter UIKit from a teardown thread that the main thread may be joining.
+        dispatch_async(dispatch_get_main_queue(), stop);
+    }
 }
 }
