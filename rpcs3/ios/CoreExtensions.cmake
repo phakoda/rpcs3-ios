@@ -30,7 +30,7 @@ if(TARGET rpcs3_ios_core_framework)
     # emulator, installer, and UIKit callback translation units.
     set_source_files_properties("${_rpcs3_ios_core_api}" PROPERTIES
         COMPILE_DEFINITIONS
-            "RPCS3CoreVersionNumber=RPCS3CoreVersionNumberBase;RPCS3CoreVersionString=RPCS3CoreVersionStringBase;rpcs3_ios_core_initialize=rpcs3_ios_core_initialize_base;rpcs3_ios_core_shutdown=rpcs3_ios_core_shutdown_base;rpcs3_ios_core_set_render_view=rpcs3_ios_core_set_render_view_base;rpcs3_ios_core_clear_render_view=rpcs3_ios_core_clear_render_view_base")
+            "RPCS3CoreVersionNumber=RPCS3CoreVersionNumberBase;RPCS3CoreVersionString=RPCS3CoreVersionStringBase;rpcs3_ios_core_initialize=rpcs3_ios_core_initialize_base;rpcs3_ios_core_shutdown=rpcs3_ios_core_shutdown_base;rpcs3_ios_core_set_render_view=rpcs3_ios_core_set_render_view_base;rpcs3_ios_core_clear_render_view=rpcs3_ios_core_clear_render_view_base;rpcs3_ios_core_import_path=rpcs3_ios_core_import_path_base")
     set_source_files_properties("${_rpcs3_ios_core_callbacks}" PROPERTIES
         COMPILE_DEFINITIONS "extend_core_callbacks=extend_core_callbacks_base")
     set_source_files_properties("${_rpcs3_ios_core_emulator}" PROPERTIES
