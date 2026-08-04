@@ -1,11 +1,14 @@
 #include "IOSCoreEmulator.h"
+#include "IOSCoreOperations.h"
 #include "RPCS3Core.h"
+#include "RPCS3CoreStatus.h"
 
 #include <algorithm>
 #include <cstring>
 #include <mutex>
 #include <string>
 #include <utility>
+#include <vector>
 
 extern "C"
 {
@@ -20,22 +23,29 @@ rpcs3_ios_core_result rpcs3_ios_core_install_package_base(
     rpcs3_ios_installation_progress_callback callback,
     void* context);
 rpcs3_ios_core_result rpcs3_ios_core_request_installation_cancel_base(void);
+size_t rpcs3_ios_core_copy_last_installed_path_base(char* buffer, size_t buffer_size);
 }
 
 namespace
 {
 std::mutex g_status_mutex;
-rpcs3_ios_installation_status g_status{
-    sizeof(rpcs3_ios_installation_status),
+rpcs3_ios_installation_status_v2 g_status{
+    sizeof(rpcs3_ios_installation_status_v2),
     0,
     0,
     RPCS3_IOS_INSTALLATION_FIRMWARE,
     RPCS3_IOS_INSTALLATION_VALIDATING,
     0,
     0,
+    RPCS3_IOS_INSTALLATION_TERMINAL_NONE,
+    RPCS3_IOS_CORE_SUCCESS,
+    0,
 };
+std::uint64_t g_next_operation_id = 0;
 std::string g_detail;
+std::string g_last_installed_path;
 thread_local std::string g_detail_copy;
+thread_local std::string g_installed_path_copy;
 
 struct callback_context
 {
@@ -43,35 +53,67 @@ struct callback_context
     void* context = nullptr;
 };
 
-bool begin_operation(rpcs3_ios_installation_kind kind, std::string detail)
+size_t copy_string(const std::string& value, char* buffer, size_t buffer_size)
 {
-    std::lock_guard lock(g_status_mutex);
-    if (g_status.active)
+    const size_t required = value.size() + 1;
+    if (!buffer || !buffer_size)
     {
-        return false;
+        return required;
     }
 
+    const size_t copied = std::min(value.size(), buffer_size - 1);
+    std::memcpy(buffer, value.data(), copied);
+    buffer[copied] = '\0';
+    return required;
+}
+
+std::string copy_base_string(size_t (*copy_function)(char*, size_t))
+{
+    const size_t required = copy_function(nullptr, 0);
+    if (!required)
+    {
+        return {};
+    }
+    std::vector<char> buffer(required);
+    copy_function(buffer.data(), buffer.size());
+    return buffer.data();
+}
+
+void begin_status(rpcs3_ios_installation_kind kind, std::string detail)
+{
+    std::lock_guard lock(g_status_mutex);
     g_status = {
-        sizeof(rpcs3_ios_installation_status),
+        sizeof(rpcs3_ios_installation_status_v2),
         1,
         0,
         static_cast<uint32_t>(kind),
         RPCS3_IOS_INSTALLATION_VALIDATING,
         0,
         0,
+        RPCS3_IOS_INSTALLATION_TERMINAL_NONE,
+        RPCS3_IOS_CORE_SUCCESS,
+        ++g_next_operation_id,
     };
     g_detail = std::move(detail);
-    return true;
+    g_last_installed_path.clear();
 }
 
-void finish_operation(rpcs3_ios_core_result result)
+void finish_status(rpcs3_ios_core_result result)
 {
+    std::string installed_path;
+    if (result == RPCS3_IOS_CORE_SUCCESS)
+    {
+        installed_path = copy_base_string(rpcs3_ios_core_copy_last_installed_path_base);
+    }
+
     std::lock_guard lock(g_status_mutex);
     g_status.active = 0;
+    g_status.result = static_cast<uint32_t>(result);
 
     if (result == RPCS3_IOS_CORE_SUCCESS)
     {
         g_status.stage = RPCS3_IOS_INSTALLATION_COMPLETE;
+        g_status.terminal_state = RPCS3_IOS_INSTALLATION_TERMINAL_SUCCEEDED;
         if (g_status.total && g_status.completed < g_status.total)
         {
             g_status.completed = g_status.total;
@@ -80,12 +122,18 @@ void finish_operation(rpcs3_ios_core_result result)
         {
             g_detail = "Installation completed.";
         }
+        g_last_installed_path = std::move(installed_path);
         return;
     }
 
     if (result == RPCS3_IOS_CORE_CANCELLED)
     {
         g_status.cancel_requested = 1;
+        g_status.terminal_state = RPCS3_IOS_INSTALLATION_TERMINAL_CANCELLED;
+    }
+    else
+    {
+        g_status.terminal_state = RPCS3_IOS_INSTALLATION_TERMINAL_FAILED;
     }
 
     const std::string error = rpcs3::ios::get_core_last_error();
@@ -119,18 +167,11 @@ void progress_trampoline(
     }
 }
 
-size_t copy_string(const std::string& value, char* buffer, size_t buffer_size)
+rpcs3::ios::core_operation operation_for(rpcs3_ios_installation_kind kind)
 {
-    const size_t required = value.size() + 1;
-    if (!buffer || !buffer_size)
-    {
-        return required;
-    }
-
-    const size_t copied = std::min(value.size(), buffer_size - 1);
-    std::memcpy(buffer, value.data(), copied);
-    buffer[copied] = '\0';
-    return required;
+    return kind == RPCS3_IOS_INSTALLATION_PACKAGE
+        ? rpcs3::ios::core_operation::install_package
+        : rpcs3::ios::core_operation::install_firmware;
 }
 }
 
@@ -143,14 +184,17 @@ rpcs3_ios_core_result rpcs3_ios_core_install_firmware(
     rpcs3_ios_installation_progress_callback callback,
     void* context)
 {
-    if (!begin_operation(
-            RPCS3_IOS_INSTALLATION_FIRMWARE,
-            "Preparing PlayStation 3 firmware installation."))
+    std::string admission_error;
+    rpcs3::ios::core_operation_scope operation(
+        operation_for(RPCS3_IOS_INSTALLATION_FIRMWARE), &admission_error);
+    if (!operation)
     {
-        rpcs3::ios::set_core_last_error("Another RPCS3Core installation operation is already active.");
+        rpcs3::ios::set_core_last_error(std::move(admission_error));
         return RPCS3_IOS_CORE_BUSY;
     }
 
+    begin_status(RPCS3_IOS_INSTALLATION_FIRMWARE,
+        "Preparing PlayStation 3 firmware installation.");
     callback_context callback_state{callback, context};
     const rpcs3_ios_core_result result = rpcs3_ios_core_install_firmware_base(
         pup_path,
@@ -158,7 +202,7 @@ rpcs3_ios_core_result rpcs3_ios_core_install_firmware(
         overwrite_existing,
         progress_trampoline,
         &callback_state);
-    finish_operation(result);
+    finish_status(result);
     return result;
 }
 
@@ -167,20 +211,23 @@ rpcs3_ios_core_result rpcs3_ios_core_install_package(
     rpcs3_ios_installation_progress_callback callback,
     void* context)
 {
-    if (!begin_operation(
-            RPCS3_IOS_INSTALLATION_PACKAGE,
-            "Preparing PlayStation 3 package installation."))
+    std::string admission_error;
+    rpcs3::ios::core_operation_scope operation(
+        operation_for(RPCS3_IOS_INSTALLATION_PACKAGE), &admission_error);
+    if (!operation)
     {
-        rpcs3::ios::set_core_last_error("Another RPCS3Core installation operation is already active.");
+        rpcs3::ios::set_core_last_error(std::move(admission_error));
         return RPCS3_IOS_CORE_BUSY;
     }
 
+    begin_status(RPCS3_IOS_INSTALLATION_PACKAGE,
+        "Preparing PlayStation 3 package installation.");
     callback_context callback_state{callback, context};
     const rpcs3_ios_core_result result = rpcs3_ios_core_install_package_base(
         package_path,
         progress_trampoline,
         &callback_state);
-    finish_operation(result);
+    finish_status(result);
     return result;
 }
 
@@ -200,6 +247,20 @@ rpcs3_ios_core_result rpcs3_ios_core_request_installation_cancel(void)
 rpcs3_ios_installation_status rpcs3_ios_core_query_installation_status(void)
 {
     std::lock_guard lock(g_status_mutex);
+    return {
+        sizeof(rpcs3_ios_installation_status),
+        g_status.active,
+        g_status.cancel_requested,
+        g_status.kind,
+        g_status.stage,
+        g_status.completed,
+        g_status.total,
+    };
+}
+
+rpcs3_ios_installation_status_v2 rpcs3_ios_core_query_installation_status_v2(void)
+{
+    std::lock_guard lock(g_status_mutex);
     return g_status;
 }
 
@@ -210,5 +271,14 @@ size_t rpcs3_ios_core_copy_installation_detail(char* buffer, size_t buffer_size)
         g_detail_copy = g_detail;
     }
     return copy_string(g_detail_copy, buffer, buffer_size);
+}
+
+size_t rpcs3_ios_core_copy_last_installed_path(char* buffer, size_t buffer_size)
+{
+    {
+        std::lock_guard lock(g_status_mutex);
+        g_installed_path_copy = g_last_installed_path;
+    }
+    return copy_string(g_installed_path_copy, buffer, buffer_size);
 }
 }
