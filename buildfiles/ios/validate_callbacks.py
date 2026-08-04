@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host-independent contracts for RPCS3Core's native UIKit callback layer."""
+"""Host-independent contracts for RPCS3Core's UIKit callback and host layers."""
 
 from __future__ import annotations
 
@@ -11,18 +11,15 @@ ROOT = Path(__file__).resolve().parents[2]
 
 REQUIRED_FILES = (
     "IOS_CORE_API.md",
-    "rpcs3/ios/IOSCoreCallbacks.h",
     "rpcs3/ios/IOSCoreCallbacks.mm",
     "rpcs3/ios/IOSCoreCallbacksComposite.cpp",
     "rpcs3/ios/IOSCoreEventCallback.mm",
-    "rpcs3/ios/IOSCoreFallbackCallbacks.h",
     "rpcs3/ios/IOSCoreFallbackCallbacks.mm",
-    "rpcs3/ios/IOSCoreImageCallbacks.h",
     "rpcs3/ios/IOSCoreImageCallbacks.mm",
     "rpcs3/ios/IOSCoreOpenURL.mm",
-    "rpcs3/ios/IOSCoreSaveDialog.h",
     "rpcs3/ios/IOSCoreSaveDialog.mm",
     "rpcs3/ios/PatchCoreHost.cmake",
+    "rpcs3/ios/RPCS3CoreStatus.h",
 )
 
 
@@ -38,8 +35,7 @@ def require(errors: list[str], condition: bool, message: str) -> None:
 def main() -> int:
     errors: list[str] = []
     for relative in REQUIRED_FILES:
-        require(errors, (ROOT / relative).is_file(), f"missing native callback source: {relative}")
-
+        require(errors, (ROOT / relative).is_file(), f"missing callback/host source: {relative}")
     if errors:
         for error in errors:
             print(f"error: {error}", file=sys.stderr)
@@ -69,27 +65,30 @@ def main() -> int:
         "rpcs3_ios_core_set_event_callback=rpcs3_ios_core_set_event_callback_base",
         "PatchCoreHost.cmake",
     ):
-        require(errors, contract in cmake, f"callback or host composition build contract is missing: {contract}")
+        require(errors, contract in cmake, f"callback composition is missing: {contract}")
 
     for contract in (
         "CoreLinkMainSafe.mm",
         "IOSCoreOpenURL.mm",
+        "RPCS3CoreStatus.h",
+        "RPCS3Core.framework 0.5",
         "@interface RPCS3CoreLinkViewController ()",
         "const std::string path_copy = path;",
         "INSTALLATION_FIRMWARE path:path_copy",
         "INSTALLATION_PACKAGE path:path_copy",
         "removeDirectory:path_copy removeEntries:NO",
         "removeDirectory:path_copy removeEntries:YES",
-        "list(FILTER _core_host_sources EXCLUDE REGEX",
-        "Could not apply the iOS core management-host lifetime adaptation",
+        "rpcs3_ios_core_query_operation_status",
+        "rpcs3_ios_core_query_installation_status_v2",
+        "rpcs3_ios_core_midi_topology_generation",
+        "scheduledTimerWithTimeInterval:0.5",
+        "installation.active != 0",
+        "#line 1",
+        "Could not apply the iOS core management-host adaptation",
     ):
-        require(errors, contract in host_patch, f"generated management-host hardening is missing: {contract}")
-
-    require(
-        errors,
-        host_patch.count("const std::string path_copy = path;") >= 4,
-        "management-host patch does not define and validate all explicit path copies",
-    )
+        require(errors, contract in host_patch, f"generated management-host contract is missing: {contract}")
+    require(errors, host_patch.count("const std::string path_copy = path;") >= 4,
+            "management-host patch does not define and validate all explicit path copies")
 
     for contract in (
         "class ios_msg_dialog",
@@ -105,6 +104,7 @@ def main() -> int:
         "extend_core_fallback_callbacks",
         "extend_core_image_callbacks",
         "extend_core_save_dialog_callback",
+        "enforce_core_lifecycle_pause_after_run",
     ):
         require(errors, contract in composite, f"callback composition ordering is missing: {contract}")
 
@@ -114,7 +114,7 @@ def main() -> int:
         "dispatch_sync(dispatch_get_main_queue()",
         "waits for any in-flight callback",
     ):
-        require(errors, contract in event_wrapper, f"main-queue event mutation contract is missing: {contract}")
+        require(errors, contract in event_wrapper, f"event callback mutation contract is missing: {contract}")
 
     for contract in (
         "callbacks.get_localized_string",
@@ -124,17 +124,16 @@ def main() -> int:
         "callbacks.play_sound",
         "AVAudioPlayerDelegate",
         "NSMutableSet<AVAudioPlayer*>",
-        "volume.value_or(1.0f)",
+        "g_accept_sounds",
+        "self.players.count >= 16",
+        "stopAll",
+        "shutdown_core_fallback_services",
         "audioPlayerDidFinishPlaying",
         "audioPlayerDecodeErrorDidOccur",
     ):
-        require(errors, contract in fallback, f"localization or native sound fallback is missing: {contract}")
-
-    require(
-        errors,
-        fallback.find("@interface RPCS3CoreSoundPool") < fallback.find("namespace rpcs3::ios"),
-        "Objective-C sound pool is incorrectly declared inside a C++ namespace",
-    )
+        require(errors, contract in fallback, f"localization/sound fallback is missing: {contract}")
+    require(errors, fallback.find("@interface RPCS3CoreSoundPool") < fallback.find("namespace rpcs3::ios"),
+            "Objective-C sound pool is incorrectly declared inside a C++ namespace")
 
     for contract in (
         "preferredFilenameExtension",
@@ -145,7 +144,7 @@ def main() -> int:
         "CGBitmapContextCreate",
         "straight RGBA8888",
     ):
-        require(errors, contract in image, f"contract-compatible ImageIO behavior is missing: {contract}")
+        require(errors, contract in image, f"ImageIO contract is missing: {contract}")
 
     for contract in (
         "NSArray<NSString*>* immutable_titles",
@@ -156,12 +155,9 @@ def main() -> int:
         "std::make_unique<ios_bounded_save_dialog>",
     ):
         require(errors, contract in bounded_save, f"bounded save-dialog contract is missing: {contract}")
-
-    require(
-        errors,
-        "save_entries" not in bounded_save.split("dispatch_async(dispatch_get_main_queue()", 1)[-1],
-        "bounded save dialog captures RPCS3's caller-owned save entry vector across UIKit dispatch",
-    )
+    require(errors,
+            "save_entries" not in bounded_save.split("dispatch_async(dispatch_get_main_queue()", 1)[-1],
+            "bounded save dialog captures caller-owned entries across UIKit dispatch")
 
     for contract in (
         "startAccessingSecurityScopedResource",
@@ -173,10 +169,9 @@ def main() -> int:
         "openURL:(NSURL*)url",
         "const std::string path_copy",
     ):
-        require(errors, contract in open_url, f"open-in-place routing contract is missing: {contract}")
+        require(errors, contract in open_url, f"Open In routing contract is missing: {contract}")
 
     for contract in (
-        "#ifdef RPCS3_IOS_CORE",
         "extern atomic_t<bool> g_headless",
         "const bool has_render_host = has_core_render_view()",
         "g_headless = !has_render_host",
@@ -188,7 +183,7 @@ def main() -> int:
     require(errors, "extend_core_callbacks(callbacks)" in emulator, "emulator callback table is not extended")
     require(errors, "g_event_generation" in emulator, "queued event generation guard is missing")
 
-    for contract in (
+    for section in (
         "Persistent mobile-safe settings",
         "Game library and persistent roots",
         "CoreMIDI input",
@@ -197,14 +192,14 @@ def main() -> int:
         "Native guest interfaces",
         "Evidence still required",
     ):
-        require(errors, contract in guide, f"public core API guide is missing section: {contract}")
+        require(errors, section in guide, f"public API guide is missing section: {section}")
 
     if errors:
         for error in errors:
             print(f"error: {error}", file=sys.stderr)
         return 1
 
-    print("RPCS3 iOS native callback/fallback/open-in-place/host-lifetime contracts passed (no Apple execution performed).")
+    print("RPCS3 iOS callback/Open In/generated-host 0.5 contracts passed (no Apple execution performed).")
     return 0
 
 
