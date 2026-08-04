@@ -57,6 +57,7 @@ if(TARGET rpcs3_ios_core_framework)
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreOperationAPI.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreMutationAPI.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreStatusAPI.cpp"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreLifecycleDeferred.mm"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacks.h"
         "${_rpcs3_ios_core_callbacks}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacksComposite.cpp"
