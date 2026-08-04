@@ -6,6 +6,16 @@ if(NOT RPCS3_IOS)
     return()
 endif()
 
+# Replace the initial CoreMIDI compatibility source with the topology-aware
+# implementation for both the framework and optional full frontend.
+if(TARGET 3rdparty_rtmidi)
+    get_target_property(_rpcs3_ios_rtmidi_sources 3rdparty_rtmidi SOURCES)
+    list(FILTER _rpcs3_ios_rtmidi_sources EXCLUDE REGEX "rtmidi_coremidi\\.cpp$")
+    set_property(TARGET 3rdparty_rtmidi PROPERTY SOURCES "${_rpcs3_ios_rtmidi_sources}")
+    target_sources(3rdparty_rtmidi PRIVATE
+        "${CMAKE_SOURCE_DIR}/3rdparty/ios/rtmidi/rtmidi_coremidi_v2.cpp")
+endif()
+
 if(TARGET rpcs3_ios_core_framework)
     set(_rpcs3_ios_core_api "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.mm")
     set(_rpcs3_ios_core_callbacks "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreCallbacks.mm")
@@ -37,7 +47,7 @@ if(TARGET rpcs3_ios_core_framework)
             "rpcs3_ios_core_set_configuration=rpcs3_ios_core_set_configuration_base;rpcs3_ios_core_reset_configuration=rpcs3_ios_core_reset_configuration_base")
     set_source_files_properties("${_rpcs3_ios_core_midi}" PROPERTIES
         COMPILE_DEFINITIONS
-            "rpcs3_ios_core_set_midi_assignment=rpcs3_ios_core_set_midi_assignment_base;rpcs3_ios_core_clear_midi_assignment=rpcs3_ios_core_clear_midi_assignment_base;rpcs3_ios_core_clear_all_midi_assignments=rpcs3_ios_core_clear_all_midi_assignments_base")
+            "rpcs3_ios_core_midi_source_count=rpcs3_ios_core_midi_source_count_base;rpcs3_ios_core_copy_midi_source=rpcs3_ios_core_copy_midi_source_base;rpcs3_ios_core_set_midi_assignment=rpcs3_ios_core_set_midi_assignment_base;rpcs3_ios_core_clear_midi_assignment=rpcs3_ios_core_clear_midi_assignment_base;rpcs3_ios_core_clear_all_midi_assignments=rpcs3_ios_core_clear_all_midi_assignments_base")
 
     target_sources(rpcs3_ios_core_framework PRIVATE
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3CoreStatus.h"
@@ -61,6 +71,7 @@ if(TARGET rpcs3_ios_core_framework)
         "${_rpcs3_ios_core_settings}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreMIDI.h"
         "${_rpcs3_ios_core_midi}"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreMIDIIdentity.mm"
         "${_rpcs3_ios_core_library}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstaller.h"
         "${_rpcs3_ios_core_installer}"
