@@ -47,7 +47,7 @@ if(TARGET rpcs3_ios_core_framework)
             "rpcs3_ios_core_set_configuration=rpcs3_ios_core_set_configuration_base;rpcs3_ios_core_reset_configuration=rpcs3_ios_core_reset_configuration_base")
     set_source_files_properties("${_rpcs3_ios_core_midi}" PROPERTIES
         COMPILE_DEFINITIONS
-            "rpcs3_ios_core_midi_source_count=rpcs3_ios_core_midi_source_count_base;rpcs3_ios_core_copy_midi_source=rpcs3_ios_core_copy_midi_source_base;rpcs3_ios_core_set_midi_assignment=rpcs3_ios_core_set_midi_assignment_base;rpcs3_ios_core_clear_midi_assignment=rpcs3_ios_core_clear_midi_assignment_base;rpcs3_ios_core_clear_all_midi_assignments=rpcs3_ios_core_clear_all_midi_assignments_base")
+            "apply_core_midi_configuration=apply_core_midi_configuration_base;rpcs3_ios_core_midi_source_count=rpcs3_ios_core_midi_source_count_base;rpcs3_ios_core_copy_midi_source=rpcs3_ios_core_copy_midi_source_base;rpcs3_ios_core_set_midi_assignment=rpcs3_ios_core_set_midi_assignment_base;rpcs3_ios_core_clear_midi_assignment=rpcs3_ios_core_clear_midi_assignment_base;rpcs3_ios_core_clear_all_midi_assignments=rpcs3_ios_core_clear_all_midi_assignments_base")
 
     target_sources(rpcs3_ios_core_framework PRIVATE
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3CoreStatus.h"
@@ -74,6 +74,7 @@ if(TARGET rpcs3_ios_core_framework)
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreMIDI.h"
         "${_rpcs3_ios_core_midi}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreMIDIIdentity.mm"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreMIDIComposition.mm"
         "${_rpcs3_ios_core_library}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstaller.h"
         "${_rpcs3_ios_core_installer}"
