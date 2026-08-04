@@ -113,6 +113,36 @@ bool copy_value(const std::string& value, char* buffer, size_t buffer_size, size
 
 namespace rpcs3::ios
 {
+std::string resolve_core_midi_source_identity(const std::string& stored_name)
+{
+    if (stored_name.empty() ||
+        stored_name.find(" [CoreMIDI ID ") != std::string::npos ||
+        stored_name.find(" [CoreMIDI Index ") != std::string::npos)
+    {
+        return stored_name;
+    }
+
+    ensure_identity_client();
+    std::string match;
+    const ItemCount count = MIDIGetNumberOfSources();
+    for (ItemCount index = 0; index < count; ++index)
+    {
+        const MIDIEndpointRef endpoint = MIDIGetSource(index);
+        if (!endpoint || raw_endpoint_name(endpoint) != stored_name)
+        {
+            continue;
+        }
+        if (!match.empty())
+        {
+            // A legacy display name is ambiguous. Preserve it rather than
+            // silently assigning a different physical endpoint.
+            return stored_name;
+        }
+        match = stable_endpoint_name(endpoint, index);
+    }
+    return match.empty() ? stored_name : match;
+}
+
 void shutdown_core_midi_identity()
 {
     std::lock_guard lock(g_identity_mutex);
