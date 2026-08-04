@@ -17,23 +17,58 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.3</string>
+    <string>0.5</string>
     <key>CFBundleVersion</key>
-    <string>3</string>
+    <string>5</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
             <key>CFBundleTypeName</key>
-            <string>PlayStation 3 Content</string>
+            <string>PlayStation 3 Firmware</string>
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>LSHandlerRank</key>
             <string>Alternate</string>
             <key>LSItemContentTypes</key>
             <array>
-                <string>net.rpcs3.content</string>
-                <string>public.data</string>
-                <string>public.folder</string>
+                <string>net.rpcs3.ps3-firmware</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>PlayStation 3 Package</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>net.rpcs3.ps3-package</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>PlayStation 3 Executable or Disc Image</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>net.rpcs3.ps3-executable</string>
+                <string>net.rpcs3.ps3-disc-image</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>PlayStation 3 License</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>net.rpcs3.ps3-license</string>
             </array>
         </dict>
     </array>
@@ -48,9 +83,26 @@
     <array>
         <dict>
             <key>UTTypeIdentifier</key>
-            <string>net.rpcs3.content</string>
+            <string>net.rpcs3.ps3-firmware</string>
             <key>UTTypeDescription</key>
-            <string>PlayStation 3 Content</string>
+            <string>PlayStation 3 Firmware Update</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>pup</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>net.rpcs3.ps3-package</string>
+            <key>UTTypeDescription</key>
+            <string>PlayStation 3 Package</string>
             <key>UTTypeConformsTo</key>
             <array>
                 <string>public.data</string>
@@ -60,14 +112,62 @@
                 <key>public.filename-extension</key>
                 <array>
                     <string>pkg</string>
-                    <string>pup</string>
-                    <string>rap</string>
-                    <string>rif</string>
-                    <string>iso</string>
-                    <string>bin</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>net.rpcs3.ps3-executable</string>
+            <key>UTTypeDescription</key>
+            <string>PlayStation 3 Executable</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
                     <string>elf</string>
                     <string>self</string>
                     <string>sprx</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>net.rpcs3.ps3-disc-image</string>
+            <key>UTTypeDescription</key>
+            <string>PlayStation 3 Disc Image</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.disk-image</string>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>iso</string>
+                    <string>bin</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>net.rpcs3.ps3-license</string>
+            <key>UTTypeDescription</key>
+            <string>PlayStation 3 License</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>rap</string>
+                    <string>rif</string>
                 </array>
             </dict>
         </dict>
