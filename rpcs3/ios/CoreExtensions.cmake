@@ -25,7 +25,7 @@ if(TARGET rpcs3_ios_core_framework)
     set(_rpcs3_ios_core_settings "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreSettings.mm")
     set(_rpcs3_ios_core_midi "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreMIDI.mm")
 
-    # Compile broad implementations under private base names. Small composition
+    # Compile broad implementations under private/raw names. Small composition
     # units then install contract-specific behavior without rewriting the larger
     # emulator, installer, and UIKit callback translation units.
     set_source_files_properties("${_rpcs3_ios_core_api}" PROPERTIES
@@ -38,7 +38,7 @@ if(TARGET rpcs3_ios_core_framework)
             "rpcs3_ios_core_set_event_callback=rpcs3_ios_core_set_event_callback_base;rpcs3_ios_core_boot_path=rpcs3_ios_core_boot_path_base;rpcs3_ios_core_pause=rpcs3_ios_core_pause_base;rpcs3_ios_core_resume=rpcs3_ios_core_resume_base;rpcs3_ios_core_stop=rpcs3_ios_core_stop_base;rpcs3_ios_core_restart=rpcs3_ios_core_restart_base")
     set_source_files_properties("${_rpcs3_ios_core_installer}" PROPERTIES
         COMPILE_DEFINITIONS
-            "rpcs3_ios_core_install_firmware=rpcs3_ios_core_install_firmware_base;rpcs3_ios_core_install_package=rpcs3_ios_core_install_package_base;rpcs3_ios_core_request_installation_cancel=rpcs3_ios_core_request_installation_cancel_base;rpcs3_ios_core_copy_last_installed_path=rpcs3_ios_core_copy_last_installed_path_base")
+            "rpcs3_ios_core_install_firmware=rpcs3_ios_core_install_firmware_raw;rpcs3_ios_core_install_package=rpcs3_ios_core_install_package_raw;rpcs3_ios_core_request_installation_cancel=rpcs3_ios_core_request_installation_cancel_raw;rpcs3_ios_core_copy_last_installed_path=rpcs3_ios_core_copy_last_installed_path_raw")
     set_source_files_properties("${_rpcs3_ios_core_library}" PROPERTIES
         COMPILE_DEFINITIONS
             "rpcs3_ios_core_add_game_directory=rpcs3_ios_core_add_game_directory_base;rpcs3_ios_core_remove_game_directory=rpcs3_ios_core_remove_game_directory_base;rpcs3_ios_core_rescan_game_directories=rpcs3_ios_core_rescan_game_directories_base;rpcs3_ios_core_prune_missing_game_directories=rpcs3_ios_core_prune_missing_game_directories_base;rpcs3_ios_core_clear_game_directories=rpcs3_ios_core_clear_game_directories_base;rpcs3_ios_core_add_game=rpcs3_ios_core_add_game_base;rpcs3_ios_core_remove_game=rpcs3_ios_core_remove_game_base")
@@ -76,6 +76,7 @@ if(TARGET rpcs3_ios_core_framework)
         "${_rpcs3_ios_core_library}"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstaller.h"
         "${_rpcs3_ios_core_installer}"
+        "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstallerTransaction.cpp"
         "${CMAKE_SOURCE_DIR}/rpcs3/ios/IOSCoreInstallationStatus.cpp")
 
     # PatchCoreSources creates the framework target. Keep the public ABI version
