@@ -14,6 +14,11 @@ rpcs3_ios_core_result rpcs3_ios_core_initialize_base(void);
 rpcs3_ios_core_result rpcs3_ios_core_shutdown_base(void);
 rpcs3_ios_core_result rpcs3_ios_core_set_render_view_base(void* native_view);
 rpcs3_ios_core_result rpcs3_ios_core_clear_render_view_base(void);
+rpcs3_ios_core_result rpcs3_ios_core_import_path_base(
+    const char* source_path,
+    char* imported_path,
+    size_t imported_path_size,
+    size_t* required_size);
 rpcs3_ios_boot_result rpcs3_ios_core_boot_path_base(const char* path, uint8_t direct_boot);
 rpcs3_ios_core_result rpcs3_ios_core_pause_base(void);
 rpcs3_ios_core_result rpcs3_ios_core_resume_base(void);
@@ -88,6 +93,22 @@ rpcs3_ios_core_result rpcs3_ios_core_clear_render_view(void)
         rpcs3::ios::core_operation::render_host,
         RPCS3_IOS_CORE_BUSY,
         [] { return rpcs3_ios_core_clear_render_view_base(); });
+}
+
+rpcs3_ios_core_result rpcs3_ios_core_import_path(
+    const char* source_path,
+    char* imported_path,
+    size_t imported_path_size,
+    size_t* required_size)
+{
+    return run_core_operation(
+        rpcs3::ios::core_operation::import_item,
+        RPCS3_IOS_CORE_BUSY,
+        [=]
+        {
+            return rpcs3_ios_core_import_path_base(
+                source_path, imported_path, imported_path_size, required_size);
+        });
 }
 
 rpcs3_ios_boot_result rpcs3_ios_core_boot_path(const char* path, uint8_t direct_boot)
