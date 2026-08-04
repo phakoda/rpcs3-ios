@@ -3,6 +3,7 @@
 #include "RPCS3Core.h"
 
 #include <string>
+#include <utility>
 
 extern "C"
 {
