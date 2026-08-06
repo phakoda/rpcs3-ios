@@ -69,42 +69,48 @@ build_dir="${repo_root}/build-ios-deps/ffmpeg-${platform}"
 rm -rf "${build_dir}"
 mkdir -p "${build_dir}" "${output_dir}"
 
-read -r -a extra_flags <<< "${FFMPEG_EXTRA_CONFIGURE_FLAGS:-}"
+configure_args=(
+    --prefix="${output_dir}"
+    --target-os=darwin
+    --arch=arm64
+    --enable-cross-compile
+    --sysroot="${sdk_path}"
+    --cc="${cc} -target ${target_triple}"
+    --cxx="${cxx} -target ${target_triple}"
+    --ar="${ar}"
+    --ranlib="${ranlib}"
+    --strip="${strip}"
+    --nm="${nm}"
+    --extra-cflags="-target ${target_triple} -isysroot ${sdk_path} -fembed-bitcode-marker -fvisibility=hidden"
+    --extra-cxxflags="-target ${target_triple} -isysroot ${sdk_path} -fembed-bitcode-marker -fvisibility=hidden"
+    --extra-ldflags="-target ${target_triple} -isysroot ${sdk_path}"
+    --disable-shared
+    --enable-static
+    --enable-pic
+    --disable-programs
+    --disable-doc
+    --disable-debug
+    --disable-sdl2
+    --disable-iconv
+    --disable-vulkan
+    --enable-audiotoolbox
+    --enable-videotoolbox
+    --enable-avcodec
+    --enable-avformat
+    --enable-avutil
+    --enable-swresample
+    --enable-swscale
+)
+
+extra_flags_string="${FFMPEG_EXTRA_CONFIGURE_FLAGS:-}"
+if [[ -n "${extra_flags_string}" ]]; then
+    extra_flags=()
+    read -r -a extra_flags <<< "${extra_flags_string}"
+    configure_args+=("${extra_flags[@]}")
+fi
 
 pushd "${build_dir}" >/dev/null
-"${ffmpeg_source}/configure" \
-    --prefix="${output_dir}" \
-    --target-os=darwin \
-    --arch=arm64 \
-    --enable-cross-compile \
-    --sysroot="${sdk_path}" \
-    --cc="${cc} -target ${target_triple}" \
-    --cxx="${cxx} -target ${target_triple}" \
-    --ar="${ar}" \
-    --ranlib="${ranlib}" \
-    --strip="${strip}" \
-    --nm="${nm}" \
-    --extra-cflags="-target ${target_triple} -isysroot ${sdk_path} -fembed-bitcode-marker -fvisibility=hidden" \
-    --extra-cxxflags="-target ${target_triple} -isysroot ${sdk_path} -fembed-bitcode-marker -fvisibility=hidden" \
-    --extra-ldflags="-target ${target_triple} -isysroot ${sdk_path}" \
-    --disable-shared \
-    --enable-static \
-    --enable-pic \
-    --disable-programs \
-    --disable-doc \
-    --disable-debug \
-    --disable-sdl2 \
-    --disable-iconv \
-    --disable-vulkan \
-    --enable-audiotoolbox \
-    --enable-videotoolbox \
-    --enable-avcodec \
-    --enable-avformat \
-    --enable-avutil \
-    --enable-swresample \
-    --enable-swscale \
-    "${extra_flags[@]}"
-
+"${ffmpeg_source}/configure" "${configure_args[@]}"
 make -j"${jobs}"
 make install
 popd >/dev/null
