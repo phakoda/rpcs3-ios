@@ -55,11 +55,10 @@ jobs:
 
       - name: Restore simulator FFmpeg
         id: ffmpeg-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: out/ffmpeg-simulator
           key: ffmpeg-ios-simulator-${{ env.IOS_DEPLOYMENT_TARGET }}-${{ env.FFMPEG_VERSION }}-${{ steps.revisions.outputs.ffmpeg_core }}-${{ hashFiles('buildfiles/ios/build_ffmpeg.sh') }}
-          save-always: true
 
       - name: Fetch pinned FFmpeg source
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -80,6 +79,13 @@ jobs:
           OUTPUT_DIR: ${{ github.workspace }}/out/ffmpeg-simulator
           JOBS: '3'
         run: bash buildfiles/ios/build_ffmpeg.sh simulator
+
+      - name: Save simulator FFmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: out/ffmpeg-simulator
+          key: ffmpeg-ios-simulator-${{ env.IOS_DEPLOYMENT_TARGET }}-${{ env.FFMPEG_VERSION }}-${{ steps.revisions.outputs.ffmpeg_core }}-${{ hashFiles('buildfiles/ios/build_ffmpeg.sh') }}
 
       - name: Download pinned MoltenVK
         shell: bash
