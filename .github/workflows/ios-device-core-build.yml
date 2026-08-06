@@ -1,0 +1,171 @@
+name: iOS device core build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'agent/ios-bootstrap'
+    paths:
+      - '.github/workflows/ios-device-core-build.yml'
+      - '.gitmodules'
+      - 'CMakeLists.txt'
+      - 'Utilities/**'
+      - '3rdparty/ios.cmake'
+      - '3rdparty/ios/**'
+      - 'buildfiles/cmake/ConfigureIOS.cmake'
+      - 'buildfiles/ios/**'
+      - 'rpcs3/CMakeLists.txt'
+      - 'rpcs3/ios/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-device-core-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IOS_DEPLOYMENT_TARGET: '16.0'
+  FFMPEG_VERSION: n8.1.1
+  MOLTENVK_VERSION: v1.4.2
+  MOLTENVK_ARCHIVE: MoltenVK-all.tar
+  MOLTENVK_SHA256: 562a15a29bc358446a56a4091c5f7e08f604184187c1d34f712148b61ef17276
+
+jobs:
+  build:
+    name: Build and verify unsigned RPCS3Core
+    runs-on: macos-15
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Record dependency revisions
+        id: revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ffmpeg_core=$(git -C 3rdparty/ffmpeg rev-parse HEAD)" >>"${GITHUB_OUTPUT}"
+          git submodule status --recursive | tee submodules.txt
+          xcodebuild -version | tee xcode-version.txt
+          cmake --version | tee cmake-version.txt
+
+      - name: Restore device FFmpeg
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: out/ffmpeg-device
+          key: ffmpeg-ios-device-${{ env.IOS_DEPLOYMENT_TARGET }}-${{ env.FFMPEG_VERSION }}-${{ steps.revisions.outputs.ffmpeg_core }}-${{ hashFiles('buildfiles/ios/build_ffmpeg.sh') }}
+          save-always: true
+
+      - name: Fetch pinned FFmpeg source
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir="${RUNNER_TEMP}/ffmpeg-source"
+          git clone --depth 1 --branch "${FFMPEG_VERSION}" \
+            https://github.com/FFmpeg/FFmpeg.git "${source_dir}"
+          test "$(git -C "${source_dir}" describe --tags --exact-match)" = "${FFMPEG_VERSION}"
+          git -C "${source_dir}" rev-parse HEAD | tee ffmpeg-source-revision.txt
+
+      - name: Build device FFmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          FFMPEG_SOURCE: ${{ runner.temp }}/ffmpeg-source
+          OUTPUT_DIR: ${{ github.workspace }}/out/ffmpeg-device
+          JOBS: '3'
+        run: bash buildfiles/ios/build_ffmpeg.sh device
+
+      - name: Download pinned MoltenVK
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/${MOLTENVK_ARCHIVE}"
+          curl --fail --location --retry 3 \
+            "https://github.com/KhronosGroup/MoltenVK/releases/download/${MOLTENVK_VERSION}/${MOLTENVK_ARCHIVE}" \
+            --output "${archive}"
+          echo "${MOLTENVK_SHA256}  ${archive}" | shasum -a 256 -c -
+          mkdir -p "${RUNNER_TEMP}/moltenvk"
+          tar -xf "${archive}" -C "${RUNNER_TEMP}/moltenvk"
+          find "${RUNNER_TEMP}/moltenvk" -type f \
+            \( -name libMoltenVK.a -o -name vulkan.h \) -print
+
+      - name: Configure device core graph
+        shell: bash
+        env:
+          MOLTENVK_ROOT: ${{ runner.temp }}/moltenvk
+          RPCS3_IOS_FFMPEG_ROOT: ${{ github.workspace }}/out/ffmpeg-device
+          BUILD_DIR: ${{ github.workspace }}/build-ios-device-core
+          RPCS3_IOS_ENABLE_LLVM: 'OFF'
+        run: |
+          set -euo pipefail
+          mkdir -p out/ios-device-build-evidence/logs
+          bash buildfiles/ios/configure.sh device core 2>&1 | \
+            tee out/ios-device-build-evidence/logs/configure.log
+
+      - name: Build unsigned framework and management app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build-ios-device-core \
+            --config Release \
+            --target rpcs3_ios_core \
+            --parallel 3 \
+            -- \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY= \
+            DEVELOPMENT_TEAM= 2>&1 | \
+            tee out/ios-device-build-evidence/logs/build.log
+
+      - name: Locate and verify products
+        shell: bash
+        run: |
+          set -euo pipefail
+          framework="$(find build-ios-device-core -type d -name RPCS3Core.framework -print -quit)"
+          app="$(find build-ios-device-core -type d -name 'RPCS3 iOS Core.app' -print -quit)"
+          [[ -n "${framework}" ]] || { echo 'error: RPCS3Core.framework was not produced' >&2; exit 1; }
+          [[ -n "${app}" ]] || { echo 'error: RPCS3 iOS Core.app was not produced' >&2; exit 1; }
+          bash buildfiles/ios/capture_build_evidence.sh \
+            out/ios-device-build-evidence \
+            --device-framework "${framework}" \
+            --app "${app}"
+          printf '%s\n' "${framework}" > out/ios-device-build-evidence/framework-path.txt
+
+      - name: Stage framework artifact
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          framework="$(cat out/ios-device-build-evidence/framework-path.txt)"
+          mkdir -p out/device-product
+          ditto "${framework}" out/device-product/RPCS3Core.framework
+
+      - name: Upload device framework
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RPCS3Core-iphoneos-${{ github.sha }}
+          path: out/device-product/RPCS3Core.framework
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-device-core-evidence-${{ github.sha }}
+          path: |
+            out/ios-device-build-evidence
+            submodules.txt
+            xcode-version.txt
+            cmake-version.txt
+            ffmpeg-source-revision.txt
+            build-ios-device-core/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: warn
+          retention-days: 14
