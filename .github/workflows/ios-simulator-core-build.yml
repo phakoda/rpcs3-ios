@@ -28,7 +28,8 @@ env:
   IOS_DEPLOYMENT_TARGET: '16.0'
   FFMPEG_VERSION: n8.1.1
   MOLTENVK_VERSION: v1.4.2
-  MOLTENVK_SHA256: b5d947b1660e6e9fed40b9cd2387e160aaab9e80b775c0cef7e14059405178c1
+  MOLTENVK_ARCHIVE: MoltenVK-all.tar
+  MOLTENVK_SHA256: 562a15a29bc358446a56a4091c5f7e08f604184187c1d34f712148b61ef17276
 
 jobs:
   build:
@@ -57,7 +58,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: out/ffmpeg-simulator
-          key: ffmpeg-ios-simulator-${{ env.IOS_DEPLOYMENT_TARGET }}-${{ env.FFMPEG_VERSION }}-${{ steps.revisions.outputs.ffmpeg_core }}
+          key: ffmpeg-ios-simulator-${{ env.IOS_DEPLOYMENT_TARGET }}-${{ env.FFMPEG_VERSION }}-${{ steps.revisions.outputs.ffmpeg_core }}-${{ hashFiles('buildfiles/ios/build_ffmpeg.sh') }}
+          save-always: true
 
       - name: Fetch pinned FFmpeg source
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -83,14 +85,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive="${RUNNER_TEMP}/MoltenVK-ios.tar"
+          archive="${RUNNER_TEMP}/${MOLTENVK_ARCHIVE}"
           curl --fail --location --retry 3 \
-            "https://github.com/KhronosGroup/MoltenVK/releases/download/${MOLTENVK_VERSION}/MoltenVK-ios.tar" \
+            "https://github.com/KhronosGroup/MoltenVK/releases/download/${MOLTENVK_VERSION}/${MOLTENVK_ARCHIVE}" \
             --output "${archive}"
           echo "${MOLTENVK_SHA256}  ${archive}" | shasum -a 256 -c -
           mkdir -p "${RUNNER_TEMP}/moltenvk"
           tar -xf "${archive}" -C "${RUNNER_TEMP}/moltenvk"
-          find "${RUNNER_TEMP}/moltenvk" -maxdepth 3 -type f \
+          find "${RUNNER_TEMP}/moltenvk" -type f \
             \( -name libMoltenVK.a -o -name vulkan.h \) -print
 
       - name: Configure simulator core graph
