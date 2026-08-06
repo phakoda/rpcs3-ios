@@ -91,4 +91,13 @@ if(TARGET rpcs3_ios_core_framework)
         PUBLIC_HEADER "${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3Core.h;${CMAKE_SOURCE_DIR}/rpcs3/ios/RPCS3CoreStatus.h")
 endif()
 
+# CMake's Xcode generator expects framework targets (or concrete files) in
+# XCODE_EMBED_FRAMEWORKS. A TARGET_BUNDLE_DIR generator expression is treated
+# as a literal build file and fails project generation. Referencing the target
+# directly also gives Xcode the correct product dependency.
+if(TARGET rpcs3_ios_core_link AND TARGET rpcs3_ios_core_framework)
+    set_target_properties(rpcs3_ios_core_link PROPERTIES
+        XCODE_EMBED_FRAMEWORKS rpcs3_ios_core_framework)
+endif()
+
 include("${CMAKE_SOURCE_DIR}/rpcs3/ios/PatchCoreHost.cmake")
