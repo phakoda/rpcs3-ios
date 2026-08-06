@@ -80,6 +80,7 @@ if [[ "${platform}" == "device" ]]; then
     candidate_slices=(
         "${moltenvk_root}/MoltenVK.xcframework/ios-arm64/libMoltenVK.a"
         "${moltenvk_root}/MoltenVK/MoltenVK.xcframework/ios-arm64/libMoltenVK.a"
+        "${moltenvk_root}/MoltenVK/MoltenVK/static/MoltenVK.xcframework/ios-arm64/libMoltenVK.a"
         "${moltenvk_root}/lib/ios/libMoltenVK.a"
     )
 else
@@ -88,6 +89,7 @@ else
     candidate_slices=(
         "${moltenvk_root}/MoltenVK.xcframework/ios-arm64_x86_64-simulator/libMoltenVK.a"
         "${moltenvk_root}/MoltenVK/MoltenVK.xcframework/ios-arm64_x86_64-simulator/libMoltenVK.a"
+        "${moltenvk_root}/MoltenVK/MoltenVK/static/MoltenVK.xcframework/ios-arm64_x86_64-simulator/libMoltenVK.a"
         "${moltenvk_root}/lib/ios-simulator/libMoltenVK.a"
     )
 fi
@@ -98,6 +100,7 @@ if [[ -z "${vulkan_include_dir}" ]]; then
     for candidate in \
         "${moltenvk_root}/include" \
         "${moltenvk_root}/MoltenVK/include" \
+        "${moltenvk_root}/MoltenVK/MoltenVK/include" \
         "${moltenvk_root}/MoltenVK.xcframework/Headers"; do
         if [[ -f "${candidate}/vulkan/vulkan.h" ]]; then
             vulkan_include_dir="${candidate}"
