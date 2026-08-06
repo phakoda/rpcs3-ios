@@ -1,0 +1,132 @@
+name: iOS simulator core build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'agent/ios-bootstrap'
+    paths:
+      - '.github/workflows/ios-simulator-core-build.yml'
+      - '.gitmodules'
+      - 'CMakeLists.txt'
+      - 'Utilities/**'
+      - '3rdparty/ios.cmake'
+      - '3rdparty/ios/**'
+      - 'buildfiles/cmake/ConfigureIOS.cmake'
+      - 'buildfiles/ios/**'
+      - 'rpcs3/CMakeLists.txt'
+      - 'rpcs3/ios/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-simulator-core-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IOS_DEPLOYMENT_TARGET: '16.0'
+  MOLTENVK_VERSION: v1.4.2
+  MOLTENVK_SHA256: b5d947b1660e6e9fed40b9cd2387e160aaab9e80b775c0cef7e14059405178c1
+
+jobs:
+  build:
+    name: Build and verify RPCS3Core
+    runs-on: macos-15
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Record dependency revisions
+        id: revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ffmpeg=$(git -C 3rdparty/ffmpeg rev-parse HEAD)" >>"${GITHUB_OUTPUT}"
+          git submodule status --recursive | tee submodules.txt
+          xcodebuild -version | tee xcode-version.txt
+          cmake --version | tee cmake-version.txt
+
+      - name: Restore simulator FFmpeg
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: out/ffmpeg-simulator
+          key: ffmpeg-ios-simulator-${{ env.IOS_DEPLOYMENT_TARGET }}-${{ steps.revisions.outputs.ffmpeg }}
+
+      - name: Build simulator FFmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          FFMPEG_SOURCE: ${{ github.workspace }}/3rdparty/ffmpeg
+          OUTPUT_DIR: ${{ github.workspace }}/out/ffmpeg-simulator
+          JOBS: '3'
+        run: bash buildfiles/ios/build_ffmpeg.sh simulator
+
+      - name: Download pinned MoltenVK
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/MoltenVK-ios.tar"
+          curl --fail --location --retry 3 \
+            "https://github.com/KhronosGroup/MoltenVK/releases/download/${MOLTENVK_VERSION}/MoltenVK-ios.tar" \
+            --output "${archive}"
+          echo "${MOLTENVK_SHA256}  ${archive}" | shasum -a 256 -c -
+          mkdir -p "${RUNNER_TEMP}/moltenvk"
+          tar -xf "${archive}" -C "${RUNNER_TEMP}/moltenvk"
+          find "${RUNNER_TEMP}/moltenvk" -maxdepth 3 -type f \
+            \( -name libMoltenVK.a -o -name vulkan.h \) -print
+
+      - name: Configure simulator core graph
+        shell: bash
+        env:
+          MOLTENVK_ROOT: ${{ runner.temp }}/moltenvk
+          RPCS3_IOS_FFMPEG_ROOT: ${{ github.workspace }}/out/ffmpeg-simulator
+          BUILD_DIR: ${{ github.workspace }}/build-ios-simulator-core
+          RPCS3_IOS_ENABLE_LLVM: 'OFF'
+        run: |
+          set -euo pipefail
+          mkdir -p out/ios-build-evidence/logs
+          bash buildfiles/ios/configure.sh simulator core 2>&1 | \
+            tee out/ios-build-evidence/logs/configure.log
+
+      - name: Build framework and management app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build-ios-simulator-core \
+            --config Release \
+            --target rpcs3_ios_core \
+            --parallel 3 2>&1 | \
+            tee out/ios-build-evidence/logs/build.log
+
+      - name: Locate and verify products
+        shell: bash
+        run: |
+          set -euo pipefail
+          framework="$(find build-ios-simulator-core -type d -name RPCS3Core.framework -print -quit)"
+          app="$(find build-ios-simulator-core -type d -name 'RPCS3 iOS Core.app' -print -quit)"
+          [[ -n "${framework}" ]] || { echo 'error: RPCS3Core.framework was not produced' >&2; exit 1; }
+          [[ -n "${app}" ]] || { echo 'error: RPCS3 iOS Core.app was not produced' >&2; exit 1; }
+          bash buildfiles/ios/capture_build_evidence.sh \
+            out/ios-build-evidence \
+            --simulator-framework "${framework}" \
+            --app "${app}"
+
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-core-evidence-${{ github.sha }}
+          path: |
+            out/ios-build-evidence
+            submodules.txt
+            xcode-version.txt
+            cmake-version.txt
+            build-ios-simulator-core/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: warn
+          retention-days: 14
