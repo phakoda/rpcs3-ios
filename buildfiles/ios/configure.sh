@@ -145,11 +145,36 @@ if [[ -z "${vulkan_library}" || ! -f "${vulkan_library}" ]]; then
     exit 66
 fi
 
+ffmpeg_libdir=""
+ffmpeg_avformat=""
+ffmpeg_avcodec=""
+ffmpeg_avutil=""
+ffmpeg_swscale=""
+ffmpeg_swresample=""
 if [[ "${mode}" == "core" || "${mode}" == "full" ]]; then
     if [[ ! -f "${RPCS3_IOS_FFMPEG_ROOT:-}/include/libavcodec/avcodec.h" ]]; then
         echo "error: ${mode} mode requires RPCS3_IOS_FFMPEG_ROOT" >&2
         exit 66
     fi
+
+    ffmpeg_libdir="${RPCS3_IOS_FFMPEG_ROOT}/lib"
+    ffmpeg_avformat="${ffmpeg_libdir}/libavformat.a"
+    ffmpeg_avcodec="${ffmpeg_libdir}/libavcodec.a"
+    ffmpeg_avutil="${ffmpeg_libdir}/libavutil.a"
+    ffmpeg_swscale="${ffmpeg_libdir}/libswscale.a"
+    ffmpeg_swresample="${ffmpeg_libdir}/libswresample.a"
+
+    for archive in \
+        "${ffmpeg_avformat}" \
+        "${ffmpeg_avcodec}" \
+        "${ffmpeg_avutil}" \
+        "${ffmpeg_swscale}" \
+        "${ffmpeg_swresample}"; do
+        if [[ ! -f "${archive}" ]]; then
+            echo "error: required cross-built FFmpeg archive is missing: ${archive}" >&2
+            exit 66
+        fi
+    done
 fi
 
 llvm_enabled="${RPCS3_IOS_ENABLE_LLVM:-OFF}"
@@ -214,6 +239,11 @@ cmake_args=(
 if [[ "${mode}" == "core" || "${mode}" == "full" ]]; then
     cmake_args+=(
         -DRPCS3_IOS_FFMPEG_ROOT="${RPCS3_IOS_FFMPEG_ROOT}"
+        -DRPCS3_IOS_AVFORMAT:FILEPATH="${ffmpeg_avformat}"
+        -DRPCS3_IOS_AVCODEC:FILEPATH="${ffmpeg_avcodec}"
+        -DRPCS3_IOS_AVUTIL:FILEPATH="${ffmpeg_avutil}"
+        -DRPCS3_IOS_SWSCALE:FILEPATH="${ffmpeg_swscale}"
+        -DRPCS3_IOS_SWRESAMPLE:FILEPATH="${ffmpeg_swresample}"
     )
     if [[ -n "${RPCS3_IOS_FFMPEG_EXTRA_LIBRARIES:-}" ]]; then
         cmake_args+=(
@@ -244,6 +274,9 @@ echo "Configuring RPCS3 iOS ${mode} target"
 echo "  SDK: ${sdk_path}"
 echo "  MoltenVK headers: ${vulkan_include_dir}"
 echo "  MoltenVK library: ${vulkan_library}"
+if [[ -n "${ffmpeg_libdir}" ]]; then
+    echo "  FFmpeg libraries: ${ffmpeg_libdir}"
+fi
 echo "  LLVM: ${llvm_enabled}"
 if [[ "${llvm_enabled}" == "ON" ]]; then
     echo "  LLVM root: ${RPCS3_IOS_LLVM_ROOT}"
