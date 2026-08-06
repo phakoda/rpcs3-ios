@@ -105,6 +105,12 @@ if [[ -z "${vulkan_include_dir}" ]]; then
         fi
     done
 fi
+if [[ -z "${vulkan_include_dir}" ]]; then
+    vulkan_header="$(find "${moltenvk_root}" -type f -path '*/vulkan/vulkan.h' -print -quit)"
+    if [[ -n "${vulkan_header}" ]]; then
+        vulkan_include_dir="$(dirname "$(dirname "${vulkan_header}")")"
+    fi
+fi
 
 vulkan_library="${Vulkan_LIBRARY:-}"
 if [[ -z "${vulkan_library}" ]]; then
@@ -115,13 +121,24 @@ if [[ -z "${vulkan_library}" ]]; then
         fi
     done
 fi
+if [[ -z "${vulkan_library}" ]]; then
+    if [[ "${platform}" == "device" ]]; then
+        vulkan_library="$(find "${moltenvk_root}" -type f -name libMoltenVK.a \
+            -path '*ios-arm64*' ! -path '*simulator*' -print -quit)"
+    else
+        vulkan_library="$(find "${moltenvk_root}" -type f -name libMoltenVK.a \
+            -path '*simulator*' -print -quit)"
+    fi
+fi
 
-if [[ ! -f "${vulkan_include_dir}/vulkan/vulkan.h" ]]; then
-    echo "error: Vulkan headers were not found; set Vulkan_INCLUDE_DIR explicitly" >&2
+if [[ -z "${vulkan_include_dir}" || ! -f "${vulkan_include_dir}/vulkan/vulkan.h" ]]; then
+    echo "error: Vulkan headers were not found under ${moltenvk_root}; set Vulkan_INCLUDE_DIR explicitly" >&2
+    find "${moltenvk_root}" -type f -name vulkan.h -print >&2 || true
     exit 66
 fi
-if [[ ! -f "${vulkan_library}" ]]; then
-    echo "error: a MoltenVK library for ${sdk} was not found; set Vulkan_LIBRARY explicitly" >&2
+if [[ -z "${vulkan_library}" || ! -f "${vulkan_library}" ]]; then
+    echo "error: a MoltenVK library for ${sdk} was not found under ${moltenvk_root}; set Vulkan_LIBRARY explicitly" >&2
+    find "${moltenvk_root}" -type f -name libMoltenVK.a -print >&2 || true
     exit 66
 fi
 
