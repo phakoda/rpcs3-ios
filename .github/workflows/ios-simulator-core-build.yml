@@ -26,6 +26,7 @@ concurrency:
 
 env:
   IOS_DEPLOYMENT_TARGET: '16.0'
+  FFMPEG_VERSION: n8.1.1
   MOLTENVK_VERSION: v1.4.2
   MOLTENVK_SHA256: b5d947b1660e6e9fed40b9cd2387e160aaab9e80b775c0cef7e14059405178c1
 
@@ -46,7 +47,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "ffmpeg=$(git -C 3rdparty/ffmpeg rev-parse HEAD)" >>"${GITHUB_OUTPUT}"
+          echo "ffmpeg_core=$(git -C 3rdparty/ffmpeg rev-parse HEAD)" >>"${GITHUB_OUTPUT}"
           git submodule status --recursive | tee submodules.txt
           xcodebuild -version | tee xcode-version.txt
           cmake --version | tee cmake-version.txt
@@ -56,13 +57,24 @@ jobs:
         uses: actions/cache@v4
         with:
           path: out/ffmpeg-simulator
-          key: ffmpeg-ios-simulator-${{ env.IOS_DEPLOYMENT_TARGET }}-${{ steps.revisions.outputs.ffmpeg }}
+          key: ffmpeg-ios-simulator-${{ env.IOS_DEPLOYMENT_TARGET }}-${{ env.FFMPEG_VERSION }}-${{ steps.revisions.outputs.ffmpeg_core }}
+
+      - name: Fetch pinned FFmpeg source
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir="${RUNNER_TEMP}/ffmpeg-source"
+          git clone --depth 1 --branch "${FFMPEG_VERSION}" \
+            https://github.com/FFmpeg/FFmpeg.git "${source_dir}"
+          test "$(git -C "${source_dir}" describe --tags --exact-match)" = "${FFMPEG_VERSION}"
+          git -C "${source_dir}" rev-parse HEAD | tee ffmpeg-source-revision.txt
 
       - name: Build simulator FFmpeg
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         shell: bash
         env:
-          FFMPEG_SOURCE: ${{ github.workspace }}/3rdparty/ffmpeg
+          FFMPEG_SOURCE: ${{ runner.temp }}/ffmpeg-source
           OUTPUT_DIR: ${{ github.workspace }}/out/ffmpeg-simulator
           JOBS: '3'
         run: bash buildfiles/ios/build_ffmpeg.sh simulator
@@ -127,6 +139,7 @@ jobs:
             submodules.txt
             xcode-version.txt
             cmake-version.txt
+            ffmpeg-source-revision.txt
             build-ios-simulator-core/CMakeFiles/CMakeConfigureLog.yaml
           if-no-files-found: warn
           retention-days: 14
