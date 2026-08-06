@@ -45,6 +45,7 @@ for command in xcrun cmake lipo file; do
     }
 done
 
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ar_tool="$(xcrun --find ar)"
 vtool="$(xcrun --find vtool)"
 
@@ -158,6 +159,14 @@ require_file "Vulkan header" "${Vulkan_INCLUDE_DIR:-}/vulkan/vulkan.h" || true
 validate_archive "MoltenVK library" "${Vulkan_LIBRARY:-}"
 
 if [[ "${mode}" == "core" || "${mode}" == "full" ]]; then
+    # Validate source-tree compatibility entry points before the expensive
+    # dependency configure pass. These wrappers provide stable aggregate target
+    # names even when upstream directory names or parent scopes differ.
+    require_file "MiniUPnP dependency entry point" \
+        "${repo_root}/3rdparty/miniupnpc/CMakeLists.txt" || true
+    require_file "libpng dependency wrapper" \
+        "${repo_root}/3rdparty/libpng/CMakeLists.txt" || true
+
     ffmpeg_root="${RPCS3_IOS_FFMPEG_ROOT:-}"
     require_file "FFmpeg avcodec header" "${ffmpeg_root}/include/libavcodec/avcodec.h" || true
     for library in avformat avcodec avutil swscale swresample; do
