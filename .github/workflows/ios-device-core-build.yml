@@ -12,6 +12,7 @@ on:
       - 'Utilities/**'
       - '3rdparty/ios.cmake'
       - '3rdparty/ios/**'
+      - '3rdparty/wolfssl/CMakeLists.txt'
       - 'buildfiles/cmake/ConfigureIOS.cmake'
       - 'buildfiles/ios/**'
       - 'rpcs3/CMakeLists.txt'
