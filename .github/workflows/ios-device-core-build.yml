@@ -117,7 +117,9 @@ jobs:
       - name: Build unsigned framework and management app
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          log=out/ios-device-build-evidence/logs/build.log
+          set +e
           cmake --build build-ios-device-core \
             --config Release \
             --target rpcs3_ios_core \
@@ -126,8 +128,34 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY= \
-            DEVELOPMENT_TEAM= 2>&1 | \
-            tee out/ios-device-build-evidence/logs/build.log
+            DEVELOPMENT_TEAM= 2>&1 | tee "${log}"
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if (( status != 0 )); then
+            error_pattern='error:|fatal error:|Undefined symbols for architecture|undefined symbol:|ld: |clang: error:|Command .* failed|BUILD FAILED'
+            {
+              echo '### iOS device core build diagnostics'
+              echo
+              echo 'First compiler/linker diagnostics promoted from the Xcode build log:'
+              echo '```text'
+              grep -E "${error_pattern}" "${log}" | tail -n 120 || true
+              echo '```'
+              echo
+              echo 'Last 80 build-log lines:'
+              echo '```text'
+              tail -n 80 "${log}" || true
+              echo '```'
+            } >>"${GITHUB_STEP_SUMMARY}"
+
+            while IFS= read -r line; do
+              line=${line//'%'/'%25'}
+              line=${line//$'\r'/'%0D'}
+              printf '::error::%s\n' "${line}"
+            done < <(grep -E "${error_pattern}" "${log}" | tail -n 20 || true)
+
+            exit "${status}"
+          fi
 
       - name: Locate and verify products
         shell: bash
