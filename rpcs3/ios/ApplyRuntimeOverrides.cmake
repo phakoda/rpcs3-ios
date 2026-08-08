@@ -32,3 +32,10 @@ set_source_files_properties(
 target_sources(rpcs3_emu PRIVATE
     "${CMAKE_SOURCE_DIR}/rpcs3/util/vm_native_ios.cpp"
     "${CMAKE_SOURCE_DIR}/Utilities/JIT_iOS.cpp")
+
+# OpenAL capture is intentionally disabled for the native iOS core, but
+# cellMic keeps a few ALC types and its error formatter in always-compiled
+# code. Export only the iOS null-backend compatibility header to this target;
+# desktop OpenAL include resolution remains untouched.
+target_include_directories(rpcs3_emu SYSTEM PRIVATE
+    "${CMAKE_SOURCE_DIR}/3rdparty/ios/openal")
