@@ -110,9 +110,9 @@ bool request_jit(jit_provider provider, std::string* error)
             }
 
             NSHTTPURLResponse* http_response = [response isKindOfClass:NSHTTPURLResponse.class]
-                ? (NSHTTPURLResponse*)response : nil;
+                ? static_cast<NSHTTPURLResponse*>(response) : nil;
             NSString* body = data.length > 0 ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : @"";
-            NSLog(@"RPCS3 JitStreamer response: HTTP %ld %@", (long)http_response.statusCode, body);
+            NSLog(@"RPCS3 JitStreamer response: HTTP %ld %@", static_cast<long>(http_response.statusCode), body);
         }];
         [task resume];
         return true;
