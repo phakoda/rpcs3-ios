@@ -44,7 +44,14 @@ else()
 		add_compile_options(-msse -msse2 -mcx16)
 	endif()
 
-	add_compile_options(-Werror=old-style-cast)
+	# Objective-C++ bridge code uses normal Cocoa/UIKit pointer-cast idioms. Keep
+	# the strict RPCS3 C++ policy, but do not serialize iOS bring-up on stylistic
+	# casts in .mm translation units.
+	if(RPCS3_IOS)
+		add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-Werror=old-style-cast>")
+	else()
+		add_compile_options(-Werror=old-style-cast)
+	endif()
 	add_compile_options(-Werror=sign-compare)
 	add_compile_options(-Werror=reorder)
 	add_compile_options(-Werror=return-type)
