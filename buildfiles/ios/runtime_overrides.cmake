@@ -1,6 +1,6 @@
 # iOS-only build adjustments that need to be applied after RPCS3's targets exist.
-# This is loaded by the iOS presets through CMAKE_PROJECT_INCLUDE and deferred
-# until the top-level directory has finished defining its subdirectories.
+# This is loaded by the iOS presets through CMAKE_PROJECT_rpcs3_INCLUDE and
+# deferred until the top-level directory has finished defining subdirectories.
 
 function(rpcs3_ios_apply_runtime_overrides)
     if(NOT RPCS3_IOS)
@@ -17,8 +17,18 @@ function(rpcs3_ios_apply_runtime_overrides)
         TARGET_DIRECTORY rpcs3_emu
         PROPERTIES COMPILE_DEFINITIONS "memory_decommit=memory_decommit_platform")
 
+    # Route only JITASM.cpp's Apple callback call through a diagnostic wrapper.
+    # The allowed callback functions themselves remain in JITASM.cpp, so the
+    # PTHREAD_JIT_WRITE_ALLOW_CALLBACKS_NP image allowlist is unchanged.
+    set_source_files_properties(
+        "${CMAKE_SOURCE_DIR}/Utilities/JITASM.cpp"
+        TARGET_DIRECTORY rpcs3_emu
+        PROPERTIES COMPILE_DEFINITIONS
+            "pthread_jit_write_with_callback_np=rpcs3_ios_pthread_jit_write_with_callback_np")
+
     target_sources(rpcs3_emu PRIVATE
-        "${CMAKE_SOURCE_DIR}/rpcs3/util/vm_native_ios.cpp")
+        "${CMAKE_SOURCE_DIR}/rpcs3/util/vm_native_ios.cpp"
+        "${CMAKE_SOURCE_DIR}/Utilities/JIT_iOS.cpp")
 endfunction()
 
 cmake_language(DEFER CALL rpcs3_ios_apply_runtime_overrides)
