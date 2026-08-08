@@ -19,7 +19,7 @@ Full frontend environment:
 Optional overrides:
   Vulkan_INCLUDE_DIR Directory containing vulkan/vulkan.h.
   Vulkan_LIBRARY     Exact path to the MoltenVK library for the selected SDK.
-  IOS_DEPLOYMENT_TARGET (default: 16.0)
+  IOS_DEPLOYMENT_TARGET (default: 17.4)
   BUILD_DIR          CMake build directory.
   RPCS3_IOS_ENABLE_LLVM (default: OFF)
   RPCS3_IOS_LLVM_ROOT
@@ -27,7 +27,7 @@ Optional overrides:
                       when RPCS3_IOS_ENABLE_LLVM=ON.
   RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS (default: OFF)
   RPCS3_IOS_ENTITLEMENTS_FILE
-                      Custom entitlement plist for a supported research or
+                      Custom entitlements for a supported research or
                       development signing environment.
   RPCS3_IOS_FFMPEG_EXTRA_LIBRARIES
                       Semicolon-separated extra static FFmpeg dependencies.
@@ -203,7 +203,7 @@ if [[ "${mode}" == "full" ]]; then
 fi
 
 sdk_path="$(xcrun --sdk "${sdk}" --show-sdk-path)"
-deployment_target="${IOS_DEPLOYMENT_TARGET:-16.0}"
+deployment_target="${IOS_DEPLOYMENT_TARGET:-17.4}"
 bootstrap_only="ON"
 qt_frontend="OFF"
 target="rpcs3_ios_bootstrap"
