@@ -23,6 +23,12 @@ rpcs3_ios_core_result rpcs3_ios_core_install_package_base(
     const char* package_path,
     rpcs3_ios_installation_progress_callback callback,
     void* context);
+uint8_t rpcs3_ios_core_is_license_path(const char* path);
+rpcs3_ios_core_result rpcs3_ios_core_install_license_base(
+    const char* license_path,
+    rpcs3_ios_installation_progress_callback callback,
+    void* context);
+size_t rpcs3_ios_core_copy_last_installed_license_path(char* buffer, size_t buffer_size);
 rpcs3_ios_core_result rpcs3_ios_core_request_installation_cancel_base(void);
 size_t rpcs3_ios_core_copy_last_installed_path_base(char* buffer, size_t buffer_size);
 }
@@ -99,10 +105,9 @@ void begin_status(rpcs3_ios_installation_kind kind, std::string detail)
     g_last_installed_path.clear();
 }
 
-void finish_status(rpcs3_ios_core_result result)
+void finish_status(rpcs3_ios_core_result result, std::string installed_path = {})
 {
-    std::string installed_path;
-    if (result == RPCS3_IOS_CORE_SUCCESS)
+    if (result == RPCS3_IOS_CORE_SUCCESS && installed_path.empty())
     {
         installed_path = copy_base_string(rpcs3_ios_core_copy_last_installed_path_base);
     }
@@ -221,14 +226,22 @@ rpcs3_ios_core_result rpcs3_ios_core_install_package(
         return RPCS3_IOS_CORE_BUSY;
     }
 
+    const bool is_license = rpcs3_ios_core_is_license_path(package_path) != 0;
     begin_status(RPCS3_IOS_INSTALLATION_PACKAGE,
-        "Preparing PlayStation 3 package installation.");
+        is_license
+            ? "Preparing PlayStation 3 RAP/EDAT license installation."
+            : "Preparing PlayStation 3 package installation.");
     callback_context callback_state{callback, context};
-    const rpcs3_ios_core_result result = rpcs3_ios_core_install_package_base(
-        package_path,
-        progress_trampoline,
-        &callback_state);
-    finish_status(result);
+    const rpcs3_ios_core_result result = is_license
+        ? rpcs3_ios_core_install_license_base(package_path, progress_trampoline, &callback_state)
+        : rpcs3_ios_core_install_package_base(package_path, progress_trampoline, &callback_state);
+
+    std::string installed_path;
+    if (is_license && result == RPCS3_IOS_CORE_SUCCESS)
+    {
+        installed_path = copy_base_string(rpcs3_ios_core_copy_last_installed_license_path);
+    }
+    finish_status(result, std::move(installed_path));
     return result;
 }
 
