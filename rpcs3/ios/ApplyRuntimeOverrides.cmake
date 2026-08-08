@@ -33,6 +33,14 @@ target_sources(rpcs3_emu PRIVATE
     "${CMAKE_SOURCE_DIR}/rpcs3/util/vm_native_ios.cpp"
     "${CMAKE_SOURCE_DIR}/Utilities/JIT_iOS.cpp")
 
+# PatchCoreSources relocates Utilities/File.cpp into ios-generated so its
+# sibling includes (File.h, mutex.h, StrFmt.h, and future local headers) no
+# longer resolve from the source file's original directory. Restore that one
+# upstream include root for the iOS core target instead of rewriting each
+# generated include independently.
+target_include_directories(rpcs3_emu PRIVATE
+    "${CMAKE_SOURCE_DIR}/Utilities")
+
 # OpenAL capture is intentionally disabled for the native iOS core, but
 # cellMic keeps a few ALC types and its error formatter in always-compiled
 # code. Export only the iOS null-backend compatibility header to this target;
