@@ -25,6 +25,12 @@ const extern spu_decoder<spu_itype> g_spu_itype;
 const extern spu_decoder<spu_iname> g_spu_iname;
 const extern spu_decoder<spu_iflag> g_spu_iflag;
 
+#if defined(ARCH_ARM64) && !defined(LLVM_AVAILABLE)
+void spu_llvm_set_compile_context(spu_llvm_compile_context*) noexcept
+{
+}
+#endif
+
 #ifdef LLVM_AVAILABLE
 
 #include "Emu/CPU/CPUTranslator.h"
@@ -3880,13 +3886,13 @@ public:
 		// it with an RAII guard so execute mode is restored on every
 		// exit path (the early "return nullptr" below would otherwise
 		// leave the thread in write mode permanently).
-		pthread_jit_write_protect_np(false);
+		jit_write_protect(false);
 
 		struct jit_write_guard
 		{
 			~jit_write_guard()
 			{
-				pthread_jit_write_protect_np(true);
+				jit_write_protect(true);
 			}
 		} _jit_guard;
 #endif
@@ -3978,7 +3984,7 @@ public:
 		}
 
 #if defined(__APPLE__)
-		pthread_jit_write_protect_np(true);
+		jit_write_protect(true);
 #endif
 #if defined(ARCH_ARM64)
 		// Flush all cache lines after potentially writing executable code

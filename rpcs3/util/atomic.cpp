@@ -474,6 +474,7 @@ static u32 cond_alloc(uptr iptr, u32 tls_slot = -1)
 	}
 
 	fmt::throw_exception("Thread semaphore limit (65535) reached in atomic wait.");
+	return 0;
 }
 
 static void cond_free(u32 cond_id, u32 tls_slot = -1)
