@@ -8,11 +8,13 @@
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 #include "Emu/System.h"
 #include "Utilities/Thread.h"
+#include "util/logs.hpp"
 
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <pthread.h>
+#include <typeinfo>
 #endif
 
 LOG_CHANNEL(sys_log, "SYS");
@@ -32,6 +34,7 @@ namespace
 			const std::string thread_name = thread_ctrl::get_name();
 			const u64 native_thread_id = static_cast<u64>(pthread_mach_thread_np(pthread_self()));
 
+			std::string exception_type = "none";
 			std::string exception_text = "no active C++ exception";
 			if (const std::exception_ptr exception = std::current_exception())
 			{
@@ -41,10 +44,12 @@ namespace
 				}
 				catch (const std::exception& error)
 				{
+					exception_type = typeid(error).name();
 					exception_text = error.what();
 				}
 				catch (...)
 				{
+					exception_type = "non-std";
 					exception_text = "non-std C++ exception";
 				}
 			}
@@ -66,15 +71,18 @@ namespace
 				"Emulator state = %u\n"
 				"Boot path = \"%s\"\n"
 				"Title ID = \"%s\"\n"
+				"Exception type = \"%s\"\n"
 				"Active exception = \"%s\"",
-				thread_name, native_thread_id, emulator_state, boot_path, title_id, exception_text);
+				thread_name, native_thread_id, emulator_state, boot_path, title_id, exception_type, exception_text);
 
 			sys_log.fatal("%s", report);
+			logs::listener::sync_all();
 			std::fflush(nullptr);
 			report_fatal_error(report, false, true);
 		}
 		catch (...)
 		{
+			logs::listener::sync_all();
 			std::fflush(nullptr);
 			if (s_previous_terminate_handler && s_previous_terminate_handler != ios_terminate_handler)
 			{
