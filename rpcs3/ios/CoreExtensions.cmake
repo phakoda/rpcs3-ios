@@ -103,3 +103,4 @@ endif()
 
 include("${CMAKE_SOURCE_DIR}/rpcs3/ios/PatchCoreHost.cmake")
 include("${CMAKE_SOURCE_DIR}/rpcs3/ios/PatchCoreHostRuntime.cmake")
+include("${CMAKE_SOURCE_DIR}/rpcs3/ios/ConfigureObjCXXWarnings.cmake")
