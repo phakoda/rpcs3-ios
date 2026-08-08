@@ -11,7 +11,7 @@ Required environment:
 
 Optional environment:
   OUTPUT_DIR       Installation prefix. Defaults to out/llvm-<platform>.
-  IOS_DEPLOYMENT_TARGET (default: 16.0)
+  IOS_DEPLOYMENT_TARGET (default: 17.4)
   BUILD_TYPE       CMake build type (default: Release).
   JOBS             Parallel build count.
   GENERATOR        CMake generator (default: Ninja when available, otherwise
@@ -52,7 +52,7 @@ for command in xcrun cmake; do
 done
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-deployment_target="${IOS_DEPLOYMENT_TARGET:-16.0}"
+deployment_target="${IOS_DEPLOYMENT_TARGET:-17.4}"
 build_type="${BUILD_TYPE:-Release}"
 jobs="${JOBS:-$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4)}"
 
