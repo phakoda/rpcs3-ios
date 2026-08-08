@@ -41,42 +41,45 @@ target_sources(rpcs3_emu PRIVATE
 target_include_directories(rpcs3_emu PRIVATE
     "${CMAKE_SOURCE_DIR}/Utilities")
 
-# PatchCoreSources also generates a Qt-free pad_thread.cpp. Upstream now wraps
-# keyboard_pad_handler in Android guards and moved NullPadHandler under Emu/Io,
-# so the original narrow replacements leave keyboard/QThread/QWindow references
-# behind and miss the native iOS handler include. Normalize those remnants in
-# the already-generated translation unit without changing shared desktop code.
-set(_rpcs3_ios_pad_thread
-    "${CMAKE_CURRENT_BINARY_DIR}/ios-generated/pad_thread_ios_core.cpp")
-if(NOT EXISTS "${_rpcs3_ios_pad_thread}")
-    message(FATAL_ERROR "The generated Qt-free iOS pad thread must exist before runtime overrides are applied")
-endif()
-file(READ "${_rpcs3_ios_pad_thread}" _rpcs3_ios_pad_thread_contents)
-string(REPLACE
-    "#include \"Emu/Io/Null/NullPadHandler.h\""
-    "#include \"Emu/Io/Null/NullPadHandler.h\"\n#include \"ios_gamecontroller_pad_handler.h\""
-    _rpcs3_ios_pad_thread_contents "${_rpcs3_ios_pad_thread_contents}")
-string(REPLACE
-    "keyboard_pad_handler"
-    "NullPadHandler"
-    _rpcs3_ios_pad_thread_contents "${_rpcs3_ios_pad_thread_contents}")
-string(REPLACE
-    "\t\t\t\tkeyptr->moveToThread(static_cast<QThread*>(m_curthread));\n"
-    ""
-    _rpcs3_ios_pad_thread_contents "${_rpcs3_ios_pad_thread_contents}")
-string(REPLACE
-    "\t\t\t\tkeyptr->SetTargetWindow(static_cast<QWindow*>(m_curwindow));\n"
-    ""
-    _rpcs3_ios_pad_thread_contents "${_rpcs3_ios_pad_thread_contents}")
+# PatchCoreSources also generates a Qt-free pad_thread.cpp for the framework.
+# Upstream now wraps keyboard_pad_handler in Android guards and moved
+# NullPadHandler under Emu/Io, so the original narrow replacements leave
+# keyboard/QThread/QWindow references behind and miss the native iOS handler
+# include. Normalize those remnants only when the framework graph exists; the
+# standalone JIT contract intentionally creates rpcs3_emu without this file.
+if(TARGET rpcs3_ios_core_framework)
+    set(_rpcs3_ios_pad_thread
+        "${CMAKE_CURRENT_BINARY_DIR}/ios-generated/pad_thread_ios_core.cpp")
+    if(NOT EXISTS "${_rpcs3_ios_pad_thread}")
+        message(FATAL_ERROR "The generated Qt-free iOS pad thread must exist before runtime overrides are applied")
+    endif()
+    file(READ "${_rpcs3_ios_pad_thread}" _rpcs3_ios_pad_thread_contents)
+    string(REPLACE
+        "#include \"Emu/Io/Null/NullPadHandler.h\""
+        "#include \"Emu/Io/Null/NullPadHandler.h\"\n#include \"ios_gamecontroller_pad_handler.h\""
+        _rpcs3_ios_pad_thread_contents "${_rpcs3_ios_pad_thread_contents}")
+    string(REPLACE
+        "keyboard_pad_handler"
+        "NullPadHandler"
+        _rpcs3_ios_pad_thread_contents "${_rpcs3_ios_pad_thread_contents}")
+    string(REPLACE
+        "\t\t\t\tkeyptr->moveToThread(static_cast<QThread*>(m_curthread));\n"
+        ""
+        _rpcs3_ios_pad_thread_contents "${_rpcs3_ios_pad_thread_contents}")
+    string(REPLACE
+        "\t\t\t\tkeyptr->SetTargetWindow(static_cast<QWindow*>(m_curwindow));\n"
+        ""
+        _rpcs3_ios_pad_thread_contents "${_rpcs3_ios_pad_thread_contents}")
 
-if(_rpcs3_ios_pad_thread_contents MATCHES "keyboard_pad_handler" OR
-   _rpcs3_ios_pad_thread_contents MATCHES "QThread" OR
-   _rpcs3_ios_pad_thread_contents MATCHES "QWindow" OR
-   NOT _rpcs3_ios_pad_thread_contents MATCHES "#include \"ios_gamecontroller_pad_handler.h\"" OR
-   NOT _rpcs3_ios_pad_thread_contents MATCHES "case pad_handler::ios_gamecontroller")
-    message(FATAL_ERROR "Could not finish the Qt-free iOS pad-thread adaptation")
+    if(_rpcs3_ios_pad_thread_contents MATCHES "keyboard_pad_handler" OR
+       _rpcs3_ios_pad_thread_contents MATCHES "QThread" OR
+       _rpcs3_ios_pad_thread_contents MATCHES "QWindow" OR
+       NOT _rpcs3_ios_pad_thread_contents MATCHES "#include \"ios_gamecontroller_pad_handler.h\"" OR
+       NOT _rpcs3_ios_pad_thread_contents MATCHES "case pad_handler::ios_gamecontroller")
+        message(FATAL_ERROR "Could not finish the Qt-free iOS pad-thread adaptation")
+    endif()
+    file(WRITE "${_rpcs3_ios_pad_thread}" "${_rpcs3_ios_pad_thread_contents}")
 endif()
-file(WRITE "${_rpcs3_ios_pad_thread}" "${_rpcs3_ios_pad_thread_contents}")
 
 # The native GameController source has a private axis_direction(value, sign)
 # helper. Current RPCS3 pad headers also expose an axis_direction type, making
