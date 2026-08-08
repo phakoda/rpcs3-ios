@@ -77,7 +77,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_TOOLCHAIN_FILE": "$env{RPCS3_IOS_QT_ROOT}/lib/cmake/Qt6/qt.toolchain.cmake",
-        "CMAKE_PROJECT_INCLUDE": "${sourceDir}/buildfiles/ios/runtime_overrides.cmake",
+        "CMAKE_PROJECT_rpcs3_INCLUDE": "${sourceDir}/buildfiles/ios/runtime_overrides.cmake",
         "CMAKE_SYSTEM_NAME": "iOS",
         "CMAKE_OSX_ARCHITECTURES": "arm64",
         "CMAKE_OSX_DEPLOYMENT_TARGET": "17.4",
