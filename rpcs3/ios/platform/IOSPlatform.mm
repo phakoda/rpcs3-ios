@@ -191,7 +191,7 @@ bool entitlement_is_true(CFStringRef entitlement)
     bool enabled = false;
     if (value && CFGetTypeID(value) == CFBooleanGetTypeID())
     {
-        enabled = CFBooleanGetValue((CFBooleanRef)value);
+        enabled = CFBooleanGetValue(static_cast<CFBooleanRef>(value));
     }
 
     if (value)
@@ -283,11 +283,11 @@ UIViewController* top_view_controller(UIViewController* controller)
 
     if ([current isKindOfClass:UINavigationController.class])
     {
-        return top_view_controller(((UINavigationController*)current).visibleViewController);
+        return top_view_controller(static_cast<UINavigationController*>(current).visibleViewController);
     }
     if ([current isKindOfClass:UITabBarController.class])
     {
-        return top_view_controller(((UITabBarController*)current).selectedViewController);
+        return top_view_controller(static_cast<UITabBarController*>(current).selectedViewController);
     }
     return current;
 }
@@ -302,7 +302,7 @@ UIViewController* active_presenter()
             continue;
         }
 
-        for (UIWindow* window in ((UIWindowScene*)scene).windows)
+        for (UIWindow* window in static_cast<UIWindowScene*>(scene).windows)
         {
             if (window.isKeyWindow && window.rootViewController)
             {
