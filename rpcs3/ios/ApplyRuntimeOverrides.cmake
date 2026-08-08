@@ -39,3 +39,16 @@ target_sources(rpcs3_emu PRIVATE
 # desktop OpenAL include resolution remains untouched.
 target_include_directories(rpcs3_emu SYSTEM PRIVATE
     "${CMAKE_SOURCE_DIR}/3rdparty/ios/openal")
+
+# configure.sh exposes one entitlement switch for every iOS mode. Apply it to
+# the real Qt-free RPCS3Core management host as well as the small bootstrap
+# target so core-mode device builds can be signed for the callback-JIT runtime.
+if(TARGET rpcs3_ios_core_link)
+    if(RPCS3_IOS_ENTITLEMENTS_FILE)
+        set_target_properties(rpcs3_ios_core_link PROPERTIES
+            XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${RPCS3_IOS_ENTITLEMENTS_FILE}")
+    elseif(RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS)
+        set_target_properties(rpcs3_ios_core_link PROPERTIES
+            XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_SOURCE_DIR}/rpcs3/ios/JIT.entitlements")
+    endif()
+endif()
