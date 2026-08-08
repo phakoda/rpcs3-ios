@@ -41,6 +41,41 @@ target_sources(rpcs3_emu PRIVATE
 target_include_directories(rpcs3_emu PRIVATE
     "${CMAKE_SOURCE_DIR}/Utilities")
 
+# The native GameController source has a private axis_direction(value, sign)
+# helper. Current RPCS3 pad headers also expose an axis_direction type, making
+# the unqualified helper calls ambiguous under Apple Clang. Keep the shared
+# source untouched and generate the iOS framework translation unit with only
+# that private helper renamed; controller scaling and mappings are unchanged.
+if(TARGET rpcs3_ios_core_framework)
+    set(_rpcs3_ios_controller_source
+        "${CMAKE_SOURCE_DIR}/rpcs3/Input/ios_gamecontroller_pad_handler.cpp")
+    set(_rpcs3_ios_controller_generated
+        "${CMAKE_CURRENT_BINARY_DIR}/ios-generated/ios_gamecontroller_pad_handler.cpp")
+    file(READ "${_rpcs3_ios_controller_source}" _rpcs3_ios_controller_contents)
+    string(REPLACE
+        "u16 axis_direction(float value, bool positive)"
+        "u16 ios_axis_button_value(float value, bool positive)"
+        _rpcs3_ios_controller_contents "${_rpcs3_ios_controller_contents}")
+    string(REPLACE
+        "axis_direction(state."
+        "ios_axis_button_value(state."
+        _rpcs3_ios_controller_contents "${_rpcs3_ios_controller_contents}")
+
+    if(NOT _rpcs3_ios_controller_contents MATCHES "u16 ios_axis_button_value\\(float value, bool positive\\)" OR
+       _rpcs3_ios_controller_contents MATCHES "axis_direction\\(state\\.")
+        message(FATAL_ERROR "Could not apply the iOS GameController axis helper rename")
+    endif()
+
+    file(WRITE "${_rpcs3_ios_controller_generated}" "${_rpcs3_ios_controller_contents}")
+    get_target_property(_rpcs3_ios_framework_sources rpcs3_ios_core_framework SOURCES)
+    list(FILTER _rpcs3_ios_framework_sources EXCLUDE REGEX
+        "rpcs3/Input/ios_gamecontroller_pad_handler\\.cpp$")
+    set_property(TARGET rpcs3_ios_core_framework PROPERTY SOURCES
+        "${_rpcs3_ios_framework_sources}")
+    target_sources(rpcs3_ios_core_framework PRIVATE
+        "${_rpcs3_ios_controller_generated}")
+endif()
+
 # OpenAL capture is intentionally disabled for the native iOS core, but
 # cellMic keeps a few ALC types and its error formatter in always-compiled
 # code. Export only the iOS null-backend compatibility header to this target;
