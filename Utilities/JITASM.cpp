@@ -18,7 +18,121 @@
 #include <mutex>
 #endif
 
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+namespace
+{
+	struct jit_copy_context
+	{
+		void* dst;
+		const void* src;
+		usz size;
+	};
+
+	int jit_copy_callback(void* opaque) noexcept
+	{
+		if (!opaque)
+		{
+			return -1;
+		}
+
+		const auto& context = *static_cast<const jit_copy_context*>(opaque);
+		if (!context.dst || !context.src ||
+			context.size > ~uptr{0} - reinterpret_cast<uptr>(context.dst) ||
+			context.size > ~uptr{0} - reinterpret_cast<uptr>(context.src))
+		{
+			return -1;
+		}
+
+		std::memcpy(context.dst, context.src, context.size);
+		return 0;
+	}
+
+	struct alignas(16) jit_atomic128_context
+	{
+		void* dst;
+		u128 value;
+	};
+
+	int jit_atomic128_callback(void* opaque) noexcept
+	{
+		if (!opaque)
+		{
+			return -1;
+		}
+
+		const auto& context = *static_cast<const jit_atomic128_context*>(opaque);
+		if (!context.dst || (reinterpret_cast<uptr>(context.dst) & 15))
+		{
+			return -1;
+		}
+
+		atomic_storage<u128>::release(*static_cast<u128*>(context.dst), context.value);
+		return 0;
+	}
+
+	PTHREAD_JIT_WRITE_ALLOW_CALLBACKS_NP(jit_copy_callback, jit_atomic128_callback);
+}
+#endif
+
 LOG_CHANNEL(jit_log, "JIT");
+
+void jit_write_copy(void* dst, const void* src, usz size) noexcept
+{
+	if (!size)
+	{
+		return;
+	}
+
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	if (!utils::memory_uses_jit_write_callback())
+	{
+		std::memcpy(dst, src, size);
+	}
+	else if (__builtin_available(iOS 17.4, *))
+	{
+		jit_copy_context context{dst, src, size};
+		if (pthread_jit_write_with_callback_np(jit_copy_callback, &context) != 0)
+		{
+			__builtin_trap();
+		}
+	}
+	else
+	{
+		// iOS has no public pthread_jit_write_protect_np fallback.
+		__builtin_trap();
+	}
+#else
+	std::memcpy(dst, src, size);
+#endif
+
+	asmjit::VirtMem::flushInstructionCache(dst, size);
+}
+
+void jit_write_atomic128(void* dst, u128 value) noexcept
+{
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	if (!utils::memory_uses_jit_write_callback())
+	{
+		atomic_storage<u128>::release(*static_cast<u128*>(dst), value);
+	}
+	else if (__builtin_available(iOS 17.4, *))
+	{
+		jit_atomic128_context context{dst, value};
+		if (pthread_jit_write_with_callback_np(jit_atomic128_callback, &context) != 0)
+		{
+			__builtin_trap();
+		}
+	}
+	else
+	{
+		__builtin_trap();
+	}
+#else
+	atomic_storage<u128>::release(*static_cast<u128*>(dst), value);
+#endif
+
+	asmjit::VirtMem::flushInstructionCache(dst, sizeof(value));
+}
 
 void jit_announce(uptr func, usz size, std::string_view name)
 {
@@ -246,7 +360,7 @@ void* jit_runtime_base::_add(asmjit::CodeHolder* code, usz align) noexcept
 				fmt::throw_exception("CodeHolder section exceeds range: Section->offset: 0x%x, Section->bufferSize: 0x%x, alloted-memory=0x%x", section->offset(), section->bufferSize(), utils::align<usz>(codeSize, align));
 			}
 
-			std::memcpy(p + section->offset(), section->data(), section->bufferSize());
+			jit_write_copy(p + section->offset(), section->data(), section->bufferSize());
 		}
 	}
 
@@ -311,8 +425,8 @@ void jit_runtime::initialize()
 
 void jit_runtime::finalize() noexcept
 {
-#ifdef __APPLE__
-	pthread_jit_write_protect_np(false);
+#if defined(__APPLE__) && !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+	jit_write_protect(false);
 #endif
 	// Reset JIT memory
 #ifdef CAN_OVERCOMMIT
@@ -326,11 +440,11 @@ void jit_runtime::finalize() noexcept
 	s_data_pos = 0;
 
 	// Restore code/data snapshot
-	std::memcpy(alloc(s_code_init.size(), 1, true), s_code_init.data(), s_code_init.size());
+	jit_write_copy(alloc(s_code_init.size(), 1, true), s_code_init.data(), s_code_init.size());
 	std::memcpy(alloc(s_data_init.size(), 1, false), s_data_init.data(), s_data_init.size());
 
-#ifdef __APPLE__
-	pthread_jit_write_protect_np(true);
+#if defined(__APPLE__) && !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+	jit_write_protect(true);
 #endif
 #ifdef ARCH_ARM64
 	// Flush all cache lines after potentially writing executable code

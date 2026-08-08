@@ -45,6 +45,11 @@
 #include <unordered_map>
 #include <util/v128.hpp>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#include <pthread.h>
+#endif
+
 #if defined(ARCH_X64)
 using native_asm = asmjit::x86::Assembler;
 using native_args = std::array<asmjit::x86::Gp, 4>;
@@ -433,12 +438,21 @@ namespace asmjit
 #endif
 }
 
-#ifdef __APPLE__
+inline void jit_write_protect(bool enabled) noexcept
+{
+#if defined(__APPLE__) && !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+	pthread_jit_write_protect_np(enabled);
+#else
+	static_cast<void>(enabled);
+#endif
+}
+
+#if defined(__APPLE__) && !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
 struct jit_write_guard
 {
 	jit_write_guard() noexcept
 	{
-		pthread_jit_write_protect_np(false);
+		jit_write_protect(false);
 
 		// Ensure stores are not reordered by the compiler
 		atomic_fence_acq_rel();
@@ -449,12 +463,32 @@ struct jit_write_guard
 		// Ensure stores are not reordered by the compiler
 		atomic_fence_seq_cst();
 
-		pthread_jit_write_protect_np(true);
+		jit_write_protect(true);
 	}
 };
 #else
-#define jit_write_guard [[maybe_unused]] int
+// Keep this as a real type instead of a macro. Several JIT call sites define
+// a narrower local guard type, which an object-like macro would corrupt.
+struct jit_write_guard
+{
+	jit_write_guard() noexcept
+	{
+	}
+
+	~jit_write_guard() noexcept
+	{
+	}
+};
 #endif
+
+// Copy bytes into executable memory while satisfying Apple's per-thread JIT
+// write-protection contract. On iOS 17.4+ this is performed entirely inside a
+// callback accepted by pthread_jit_write_with_callback_np().
+void jit_write_copy(void* dst, const void* src, usz size) noexcept;
+
+// Atomically replace one aligned 16-byte executable-memory patch. This keeps
+// live AArch64 branch patchpoints coherent while using the iOS JIT callback.
+void jit_write_atomic128(void* dst, u128 value) noexcept;
 
 // Build runtime function with asmjit::X86Assembler
 template <typename FT, typename Asm = native_asm, typename F>
