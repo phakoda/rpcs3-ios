@@ -29,7 +29,8 @@ bool entitlement_is_true(CFStringRef entitlement)
 
     CFErrorRef error = nullptr;
     CFTypeRef value = SecTaskCopyValueForEntitlement(task, entitlement, &error);
-    const bool result = value && CFGetTypeID(value) == CFBooleanGetTypeID() && CFBooleanGetValue((CFBooleanRef)value);
+    const bool result = value && CFGetTypeID(value) == CFBooleanGetTypeID() &&
+        CFBooleanGetValue(static_cast<CFBooleanRef>(value));
 
     if (value)
     {
@@ -82,7 +83,7 @@ bool set_jit_write_protection(bool executable_mode)
         return true;
     }
 #else
-    (void)executable_mode;
+    static_cast<void>(executable_mode);
 #endif
     return false;
 }
