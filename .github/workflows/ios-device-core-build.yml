@@ -31,7 +31,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IOS_DEPLOYMENT_TARGET: '16.0'
+  IOS_DEPLOYMENT_TARGET: '17.4'
   FFMPEG_VERSION: n8.1.1
   MOLTENVK_VERSION: v1.4.2
   MOLTENVK_ARCHIVE: MoltenVK-all.tar
