@@ -6,6 +6,8 @@ if(NOT RPCS3_IOS)
     return()
 endif()
 
+include("${CMAKE_SOURCE_DIR}/rpcs3/ios/ApplyRuntimeOverrides.cmake")
+
 # Replace the initial CoreMIDI compatibility source with the topology-aware
 # implementation for both the framework and optional full frontend.
 if(TARGET 3rdparty_rtmidi)
