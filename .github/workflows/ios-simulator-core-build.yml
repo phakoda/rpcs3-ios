@@ -16,6 +16,11 @@ on:
       - 'buildfiles/cmake/ConfigureIOS.cmake'
       - 'buildfiles/ios/**'
       - 'rpcs3/CMakeLists.txt'
+      - 'rpcs3/Crypto/**'
+      - 'rpcs3/Emu/**'
+      - 'rpcs3/Input/**'
+      - 'rpcs3/Loader/**'
+      - 'rpcs3/util/**'
       - 'rpcs3/ios/**'
 
 permissions:
