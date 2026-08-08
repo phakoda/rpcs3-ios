@@ -10,7 +10,7 @@ Required environment:
 
 Optional environment:
   OUTPUT_DIR      Installation prefix. Defaults to out/ffmpeg-<platform>.
-  IOS_DEPLOYMENT_TARGET (default: 16.0)
+  IOS_DEPLOYMENT_TARGET (default: 17.4)
   JOBS            Parallel build count.
   FFMPEG_EXTRA_CONFIGURE_FLAGS
                   Additional whitespace-separated FFmpeg configure flags.
@@ -44,7 +44,7 @@ for command in xcrun make perl; do
 done
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-deployment_target="${IOS_DEPLOYMENT_TARGET:-16.0}"
+deployment_target="${IOS_DEPLOYMENT_TARGET:-17.4}"
 jobs="${JOBS:-$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4)}"
 
 if [[ "${platform}" == "device" ]]; then
