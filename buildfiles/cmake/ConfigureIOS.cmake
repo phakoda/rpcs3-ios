@@ -14,8 +14,16 @@ if(NOT CMAKE_OSX_ARCHITECTURES)
     set(CMAKE_OSX_ARCHITECTURES arm64 CACHE STRING "iOS architectures" FORCE)
 endif()
 
+# RPCS3's iPhone JIT write path uses pthread_jit_write_with_callback_np, which
+# is available starting in iOS 17.4. Do not advertise an older deployment
+# target that would trap as soon as callback-scoped generated-code writes are
+# required.
 if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET 16.0 CACHE STRING "Minimum supported iOS version" FORCE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET 17.4 CACHE STRING "Minimum supported iOS version" FORCE)
+endif()
+if(CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS 17.4)
+    message(FATAL_ERROR
+        "RPCS3 iOS requires CMAKE_OSX_DEPLOYMENT_TARGET=17.4 or newer for callback-scoped JIT writes")
 endif()
 
 option(RPCS3_IOS_BUILD_QT_FRONTEND "Build the desktop-derived Qt frontend after the emulator core" OFF)
