@@ -123,16 +123,35 @@ jobs:
           simulator_sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
 
           xcrun --sdk iphoneos clang++ \
-            -std=c++20 -arch arm64 -miphoneos-version-min=17.4 \
+            -std=c++20 -fno-exceptions -arch arm64 -miphoneos-version-min=17.4 \
             -isysroot "${device_sdk}" "${probe}" \
             -o "${RUNNER_TEMP}/jit-callback-iphoneos"
           xcrun --sdk iphonesimulator clang++ \
-            -std=c++20 -arch arm64 -mios-simulator-version-min=17.4 \
+            -std=c++20 -fno-exceptions -arch arm64 -mios-simulator-version-min=17.4 \
             -isysroot "${simulator_sdk}" "${probe}" \
             -o "${RUNNER_TEMP}/jit-callback-iphonesimulator"
 
           test "$(xcrun vtool -show-build "${RUNNER_TEMP}/jit-callback-iphoneos" | awk '/^[[:space:]]*platform / {print $2; exit}')" = IOS
           test "$(xcrun vtool -show-build "${RUNNER_TEMP}/jit-callback-iphonesimulator" | awk '/^[[:space:]]*platform / {print $2; exit}')" = IOSSIMULATOR
+
+      - name: Syntax-check runtime shims with RPCS3 exception policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
+          common=(
+            -std=c++23
+            -fno-exceptions
+            -arch arm64
+            -miphoneos-version-min=17.4
+            -isysroot "${sdk}"
+            -DARCH_ARM64
+            -I"${GITHUB_WORKSPACE}"
+            -I"${GITHUB_WORKSPACE}/rpcs3"
+            -fsyntax-only
+          )
+          xcrun --sdk iphoneos clang++ "${common[@]}" Utilities/JIT_iOS.cpp
+          xcrun --sdk iphoneos clang++ "${common[@]}" rpcs3/util/vm_native_ios.cpp
 
       - name: Validate bootstrap runtime override wiring
         shell: bash
