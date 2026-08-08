@@ -1484,7 +1484,8 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 	{
 #if defined(ARCH_ARM64)
 		// Allocate some writable executable memory
-		u8* const wxptr = jit_runtime::alloc(size0 * 128 + 16, 16);
+		const usz code_capacity = size0 * 128 + 16;
+		u8* const wxptr = jit_runtime::alloc(code_capacity, 16);
 
 		if (!wxptr)
 		{
@@ -1492,13 +1493,45 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 		}
 
 		// Raw assembly pointer
+	#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+		std::vector<u8> jit_buffer(code_capacity);
+		u8* raw = jit_buffer.data();
+	#else
 		u8* raw = wxptr;
+	#endif
+
+		auto resolve_exec_address = [&](auto target) -> u64
+		{
+			using target_type = std::remove_cvref_t<decltype(target)>;
+			const u64 address = [&]() -> u64
+			{
+				if constexpr (std::is_pointer_v<target_type>)
+				{
+					return reinterpret_cast<uptr>(target);
+				}
+				else
+				{
+					return static_cast<u64>(target);
+				}
+			}();
+
+	#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+			const u64 buffer_begin = reinterpret_cast<uptr>(jit_buffer.data());
+			const u64 buffer_end = buffer_begin + jit_buffer.size();
+			if (address >= buffer_begin && address < buffer_end)
+			{
+				return reinterpret_cast<uptr>(wxptr) + address - buffer_begin;
+			}
+	#endif
+
+			return address;
+		};
 
 		auto make_jump = [&](asmjit::arm::CondCode op, auto target)
 		{
 			// 36 bytes
 			// Fallback to dispatch if no target
-			const u64 taddr = target ? reinterpret_cast<u64>(target) : reinterpret_cast<u64>(tr_dispatch);
+			const u64 taddr = target ? resolve_exec_address(target) : reinterpret_cast<u64>(tr_dispatch);
 
 			// ldr x9, #16 -> ldr x9, taddr
 			*raw++ = 0x89;
@@ -1690,7 +1723,7 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 #elif defined(ARCH_ARM64)
 				//	Rewrite jump address
 				{
-					u64 raw64 = reinterpret_cast<u64>(raw);
+					u64 raw64 = resolve_exec_address(raw);
 					memcpy(w.rel32 - 8, &raw64, 8);
 				}
 #else
@@ -1756,7 +1789,11 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 #if defined(ARCH_X64)
 			ensure(raw + 12 <= wxptr + size0 * 22 + 16); // "Asm overflow"
 #elif defined(ARCH_ARM64)
-			ensure(raw + (4 * 4) <= wxptr + size0 * 128 + 16);
+	#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+			ensure(raw + (4 * 4) <= jit_buffer.data() + jit_buffer.size());
+	#else
+			ensure(raw + (4 * 4) <= wxptr + code_capacity);
+	#endif
 #else
 #error "Unimplemented"
 #endif
@@ -1967,11 +2004,17 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 		}
 
 		workload.clear();
+	#if defined(ARCH_ARM64) && defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+		const usz trampoline_size = raw - jit_buffer.data();
+		jit_write_copy(wxptr, jit_buffer.data(), trampoline_size);
+	#else
+		const usz trampoline_size = raw - wxptr;
+	#endif
 		result = reinterpret_cast<spu_function_t>(reinterpret_cast<u64>(wxptr));
 
 		std::string fname;
 		fmt::append(fname, "__ub%u", m_flat_list.size());
-		jit_announce(wxptr, raw - wxptr, fname);
+		jit_announce(wxptr, trampoline_size, fname);
 	}
 
 	if (auto _old = stuff_it->trampoline.compare_and_swap(nullptr, result))
@@ -2069,11 +2112,12 @@ spu_function_t spu_runtime::make_branch_patchpoint(u16 data) const
 	return reinterpret_cast<spu_function_t>(raw);
 #elif defined(ARCH_ARM64)
 #if defined(__APPLE__)
-	pthread_jit_write_protect_np(false);
+	jit_write_protect(false);
 #endif
 
 	u8* const patch_fn = ensure(jit_runtime::alloc(36, 16));
-	u8* raw = patch_fn;
+	std::array<u8, 36> patch_code{};
+	u8* raw = patch_code.data();
 
 	// adr x21, #16
 	*raw++ = 0x95;
@@ -2108,9 +2152,10 @@ spu_function_t spu_runtime::make_branch_patchpoint(u16 data) const
 
 	*raw++ = static_cast<u8>(data >> 8);
 	*raw++ = static_cast<u8>(data & 0xff);
+	jit_write_copy(patch_fn, patch_code.data(), patch_code.size());
 
 #if defined(__APPLE__)
-	pthread_jit_write_protect_np(true);
+	jit_write_protect(true);
 #endif
 
 	// Flush all cache lines after potentially writing executable code
@@ -2174,11 +2219,11 @@ void spu_recompiler_base::dispatch(spu_thread& spu, void*, u8* rip)
 		const u64 target = reinterpret_cast<u64>(spu_runtime::tr_all);
 		std::memcpy(bytes + 8, &target, 8);
 #if defined(__APPLE__)
-		pthread_jit_write_protect_np(false);
+		jit_write_protect(false);
 #endif
-		atomic_storage<u128>::release(*reinterpret_cast<u128*>(rip), result);
+		jit_write_atomic128(rip, result);
 #if defined(__APPLE__)
-		pthread_jit_write_protect_np(true);
+		jit_write_protect(true);
 #endif
 
 		// Flush all cache lines after potentially writing executable code
@@ -2206,7 +2251,7 @@ void spu_recompiler_base::dispatch(spu_thread& spu, void*, u8* rip)
 	}
 
 #if defined(__APPLE__)
-	pthread_jit_write_protect_np(false);
+	jit_write_protect(false);
 #endif
 	auto program = spu.jit->analyse(spu._ptr<u32>(0), spu.pc);
 #ifdef ARCH_ARM64
@@ -2232,7 +2277,7 @@ void spu_recompiler_base::dispatch(spu_thread& spu, void*, u8* rip)
 		}
 	}
 #if defined(__APPLE__)
-	pthread_jit_write_protect_np(true);
+	jit_write_protect(true);
 #endif
 
 #if defined(ARCH_ARM64)
@@ -2322,11 +2367,11 @@ void spu_recompiler_base::branch(spu_thread& spu, void*, u8* rip)
 	const u64 target = reinterpret_cast<u64>(func);
 	std::memcpy(bytes + 8, &target, 8);
 #if defined(__APPLE__)
-	pthread_jit_write_protect_np(false);
+	jit_write_protect(false);
 #endif
-	atomic_storage<u128>::release(*reinterpret_cast<u128*>(rip), result);
+	jit_write_atomic128(rip, result);
 #if defined(__APPLE__)
-	pthread_jit_write_protect_np(true);
+	jit_write_protect(true);
 #endif
 
 	// Flush all cache lines after potentially writing executable code

@@ -69,6 +69,50 @@
           ]
         }
       }
+    },
+    {
+      "name": "ios-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "$env{RPCS3_IOS_QT_ROOT}/lib/cmake/Qt6/qt.toolchain.cmake",
+        "CMAKE_SYSTEM_NAME": "iOS",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "17.4",
+        "USE_NATIVE_INSTRUCTIONS": "OFF",
+        "USE_VULKAN": "OFF",
+        "USE_SDL": "OFF",
+        "USE_FAUDIO": "OFF",
+        "USE_LIBEVDEV": "OFF",
+        "USE_SYSTEM_CURL": "OFF",
+        "USE_SYSTEM_OPENAL": "OFF",
+        "USE_SYSTEM_OPENCV": "OFF",
+        "ALSOFT_UPDATE_BUILD_VERSION": "OFF",
+        "WITH_LLVM": "OFF",
+        "USE_LTO": "OFF",
+        "RPCS3_IOS_FFMPEG_ROOT": "$env{RPCS3_IOS_FFMPEG_ROOT}",
+        "RPCS3_IOS_QT_ROOT": "$env{RPCS3_IOS_QT_ROOT}",
+        "RPCS3_IOS_QT_HOST_PATH": "$env{RPCS3_IOS_QT_HOST_PATH}"
+      }
+    },
+    {
+      "name": "ios-device",
+      "displayName": "iOS device (arm64)",
+      "inherits": "ios-base",
+      "binaryDir": "${sourceDir}/build-ios-device",
+      "cacheVariables": {
+        "CMAKE_OSX_SYSROOT": "iphoneos"
+      }
+    },
+    {
+      "name": "ios-simulator",
+      "displayName": "iOS Simulator (arm64)",
+      "inherits": "ios-base",
+      "binaryDir": "${sourceDir}/build-ios-simulator",
+      "cacheVariables": {
+        "CMAKE_OSX_SYSROOT": "iphonesimulator"
+      }
     }
   ],
   "buildPresets": [
@@ -81,6 +125,14 @@
       "name": "msvc-release",
       "configurePreset": "msvc",
       "configuration": "Release"
+    },
+    {
+      "name": "ios-device",
+      "configurePreset": "ios-device"
+    },
+    {
+      "name": "ios-simulator",
+      "configurePreset": "ios-simulator"
     }
   ]
 }

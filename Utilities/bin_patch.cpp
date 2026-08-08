@@ -793,6 +793,7 @@ bool patch_engine::add_patch_data(YAML::Node node, patch_info& info, u32 modifie
 	case patch_type::load:
 	{
 		fmt::throw_exception("Unreachable patch type: %s", p_data.type);
+		return false;
 	}
 	case patch_type::bp_exec:
 	case patch_type::utf8:

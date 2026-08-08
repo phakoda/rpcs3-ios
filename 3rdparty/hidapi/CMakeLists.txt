@@ -1,5 +1,22 @@
 # hidapi
-if(USE_SYSTEM_HIDAPI)
+if(RPCS3_IOS)
+	# iOS has no public IOKit USB transport. Build HIDAPI over libusb's null
+	# backend so callers retain the API and simply enumerate no USB devices.
+	find_package(Threads REQUIRED)
+	add_library(hidapi_libusb STATIC
+		hidapi/libusb/hid.c
+	)
+	target_compile_definitions(hidapi_libusb PRIVATE
+		NO_ICONV
+		HIDAPI_THREAD_MODEL_INCLUDE="hidapi_thread_ios.h")
+	target_include_directories(hidapi_libusb
+		PUBLIC hidapi/hidapi
+		PRIVATE hidapi/libusb ${CMAKE_CURRENT_SOURCE_DIR})
+	target_link_libraries(hidapi_libusb PRIVATE usb-1.0-static Threads::Threads)
+
+	add_library(3rdparty_hidapi INTERFACE)
+	target_link_libraries(3rdparty_hidapi INTERFACE hidapi_libusb)
+elseif(USE_SYSTEM_HIDAPI)
 	message(STATUS "RPCS3: using shared hidapi")
 	pkg_check_modules(hidapi-hidraw REQUIRED IMPORTED_TARGET hidapi-hidraw)
 	add_library(3rdparty_hidapi INTERFACE)

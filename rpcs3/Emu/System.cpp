@@ -336,6 +336,25 @@ static void fixup_settings(const psf::registry* _psf)
 		}
 	}
 
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	// LLVM's MCJIT writes and relocations are not callback-scoped yet. Keep the
+	// initial iOS port on the ASMJIT-backed static interpreter path until that
+	// memory manager has a staging/finalization implementation.
+	if (g_cfg.core.ppu_decoder != ppu_decoder_type::_static)
+	{
+		sys_log.warning("The PPU decoder '%s' is not yet callback-safe on iOS and will be changed to '%s' during emulation.",
+			g_cfg.core.ppu_decoder.get(), ppu_decoder_type::_static);
+		g_cfg.core.ppu_decoder.set(ppu_decoder_type::_static);
+	}
+
+	if (g_cfg.core.spu_decoder != spu_decoder_type::_static)
+	{
+		sys_log.warning("The SPU decoder '%s' is not yet callback-safe on iOS and will be changed to '%s' during emulation.",
+			g_cfg.core.spu_decoder.get(), spu_decoder_type::_static);
+		g_cfg.core.spu_decoder.set(spu_decoder_type::_static);
+	}
+#endif
+
 #if defined(ARCH_ARM64)
 	if (g_cfg.core.spu_decoder == spu_decoder_type::asmjit)
 	{
@@ -1916,13 +1935,13 @@ game_boot_result Emulator::Load(const std::string& title_id, bool is_disc_patch,
 				// crashes ~12s into boot at 0x300010000). Pair the enable
 				// with an RAII guard so execute mode is restored on every
 				// exit path (return, exception, etc.).
-				pthread_jit_write_protect_np(false);
+				jit_write_protect(false);
 
 				struct jit_write_guard
 				{
 					~jit_write_guard() noexcept
 					{
-						pthread_jit_write_protect_np(true);
+						jit_write_protect(true);
 					}
 				} _jit_guard;
 #endif

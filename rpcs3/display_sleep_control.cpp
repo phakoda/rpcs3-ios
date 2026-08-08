@@ -4,12 +4,16 @@
 #include <windows.h>
 
 #elif defined(__APPLE__)
+#include <TargetConditionals.h>
+
+#if TARGET_OS_OSX
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #include <IOKit/pwr_mgt/IOPMLib.h>
 #pragma GCC diagnostic pop
 
 static IOPMAssertionID s_pm_assertion = kIOPMNullAssertionID;
+#endif
 
 #elif defined(HAVE_QTDBUS)
 #include <QtDBus/QDBusConnection>
@@ -22,7 +26,7 @@ static u32 s_dbus_cookie = 0;
 
 bool display_sleep_control_supported()
 {
-#if defined(_WIN32) || defined(__APPLE__)
+#if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX)
 	return true;
 #elif defined(HAVE_QTDBUS)
 	for (const char* service : { "org.freedesktop.ScreenSaver", "org.mate.ScreenSaver" })
@@ -48,7 +52,7 @@ void enable_display_sleep(bool enabled)
 
 #ifdef _WIN32
 	SetThreadExecutionState(enabled ? ES_CONTINUOUS : (ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED));
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) && TARGET_OS_OSX
 	if (enabled && s_pm_assertion != kIOPMNullAssertionID)
 	{
 		IOPMAssertionRelease(s_pm_assertion);

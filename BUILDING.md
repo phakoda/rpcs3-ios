@@ -1,5 +1,42 @@
 # Building
 
+## iOS and iOS Simulator (first-stage port)
+
+The iOS build is an arm64 cross-build and requires target-built Qt 6 and
+FFmpeg prefixes. A macOS/Homebrew dependency is not binary-compatible even
+when it also contains arm64 code. Set the dependency roots for the selected
+SDK, then use the matching preset. The preset loads the target Qt SDK's
+`qt.toolchain.cmake` automatically:
+
+```sh
+export RPCS3_IOS_QT_ROOT=/path/to/Qt/ios
+export RPCS3_IOS_QT_HOST_PATH=/path/to/Qt/macos
+export RPCS3_IOS_FFMPEG_ROOT=/path/to/ffmpeg-iphoneos
+cmake --preset ios-device
+cmake --build --preset ios-device
+```
+
+For Apple Silicon Simulator, point `RPCS3_IOS_FFMPEG_ROOT` at an arm64
+`iPhoneSimulator` build and use `ios-simulator` instead. CMake inspects
+FFmpeg's Mach-O platform metadata and rejects a device/simulator mismatch.
+The resulting Ninja bundle is under `build-ios-*/bin/rpcs3.app`.
+
+The default entitlements file enables extended virtual addressing, which is
+required by RPCS3's guest-memory mirrors. Restricted JIT capabilities must be
+supplied through `RPCS3_IOS_ENTITLEMENTS_FILE`, and the signing profile used
+for a device build must authorize every requested entitlement. The dedicated
+`buildfiles/ios/probe_jit_callback.sh` probe shows the iOS JIT entitlement and
+callback allow-list combination expected by the `MAP_JIT` path.
+
+On a debug-authorized jailbreak runtime that rejects entitlement-gated
+`MAP_JIT` with `EPERM`, RPCS3 falls back to plain executable mappings and
+direct JIT writes. Launch the app under `debugserver`/LLDB so iOS marks the
+process as debugged before its static initializers run. This fallback is not a
+replacement for authorized JIT entitlements on a stock device.
+
+`RPCS3_IOS_BUNDLE_IDENTIFIER` and, for Xcode-generator builds,
+`RPCS3_IOS_DEVELOPMENT_TEAM` control the corresponding signing metadata.
+
 Only Windows and Linux are officially supported for building. However, various other platforms are capable of building RPCS3.
 Other instructions may be found [here](https://wiki.rpcs3.net/index.php?title=Building).
 

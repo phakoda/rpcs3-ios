@@ -60,6 +60,7 @@
 #include <QFileDialog>
 #include <QFontDatabase>
 #include <QBuffer>
+#include <QStandardPaths>
 #include <QTemporaryFile>
 #include <QDesktopServices>
 
@@ -1393,8 +1394,21 @@ void main_window::InstallPup(main_window* mw, QString file_path)
 			return;
 		}
 
-		const QString path_last_pup = mw->m_gui_settings->GetValue(gui::fd_install_pup).toString();
-		file_path = QFileDialog::getOpenFileName(mw, tr("Select PS3UPDAT.PUP To Install"), path_last_pup, tr("PS3 update file (PS3UPDAT.PUP);;All pup files (*.pup *.PUP);;All files (*.*)"));
+#ifdef Q_OS_IOS
+		// Files transferred directly into the app's Documents directory do not
+		// need a security-scoped URL. Prefer the conventional firmware filename
+		// there to avoid the native document picker's scene transition.
+		const QString staged_pup = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/PS3UPDAT.PUP");
+		if (QFileInfo::exists(staged_pup))
+		{
+			file_path = staged_pup;
+		}
+		else
+#endif
+		{
+			const QString path_last_pup = mw->m_gui_settings->GetValue(gui::fd_install_pup).toString();
+			file_path = QFileDialog::getOpenFileName(mw, tr("Select PS3UPDAT.PUP To Install"), path_last_pup, tr("PS3 update file (PS3UPDAT.PUP);;All pup files (*.pup *.PUP);;All files (*.*)"));
+		}
 	}
 	else if (mw)
 	{
@@ -1411,10 +1425,34 @@ void main_window::InstallPup(main_window* mw, QString file_path)
 		if (mw)
 		{
 			// Handle the actual installation with a timeout. Otherwise the source explorer instance is not usable during the following file processing.
+#ifdef Q_OS_IOS
+			// QFileDialog temporarily backgrounds the application on iOS. Starting the
+			// synchronous PUP installation before the scene becomes active again blocks
+			// the scene update and triggers the 10-second iOS watchdog.
+			auto install_when_active = std::make_shared<std::function<void()>>();
+			*install_when_active = [mw, file_path, install_when_active]()
+			{
+				if (QGuiApplication::applicationState() != Qt::ApplicationActive)
+				{
+					QTimer::singleShot(100, mw, *install_when_active);
+					return;
+				}
+
+				// Break the self-reference once polling is no longer needed, then give
+				// UIKit one more event-loop turn to finish the scene transition.
+				*install_when_active = {};
+				QTimer::singleShot(250, mw, [mw, file_path]()
+				{
+					HandlePupInstallation(mw, file_path);
+				});
+			};
+			QTimer::singleShot(0, mw, *install_when_active);
+#else
 			QTimer::singleShot(0, [mw, file_path]()
 			{
 				HandlePupInstallation(mw, file_path);
 			});
+#endif
 		}
 		else
 		{

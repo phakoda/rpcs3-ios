@@ -10,7 +10,10 @@
 #include "pad_thread.h"
 
 #if defined(__APPLE__)
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
 #include "3rdparty/hidapi/hidapi/mac/hidapi_darwin.h"
+#endif
 #endif
 
 #include <algorithm>
@@ -71,7 +74,9 @@ public:
 		Emu.BlockingCallFromMainThread([&error_code]()
 		{
 			error_code = hid_init();
+	#if TARGET_OS_OSX
 			hid_darwin_set_open_exclusive(0);
+	#endif
 		}, false);
 #else
 		const int error_code = hid_init();

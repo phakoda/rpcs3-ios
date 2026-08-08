@@ -68,7 +68,7 @@ namespace
 		named_thread worker("LLVM JIT", [&]()
 		{
 #if defined(__APPLE__)
-			pthread_jit_write_protect_np(false);
+			jit_write_protect(false);
 #endif
 			g_llvm_fatal_message = &error;
 
@@ -76,7 +76,7 @@ namespace
 
 			g_llvm_fatal_message = nullptr;
 #if defined(__APPLE__)
-			pthread_jit_write_protect_np(true);
+			jit_write_protect(true);
 #endif
 		});
 

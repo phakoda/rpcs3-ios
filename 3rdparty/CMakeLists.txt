@@ -51,7 +51,11 @@ else()
 endif()
 
 # libusb
-if(CMAKE_SYSTEM_NAME MATCHES "DragonFly|FreeBSD")
+if(RPCS3_IOS)
+	# iOS uses the bundled library with its null backend. Host pkg-config
+	# results are never valid for an iPhone target.
+	set(USE_SYSTEM_LIBUSB OFF CACHE BOOL "Use bundled libusb on iOS" FORCE)
+elseif(CMAKE_SYSTEM_NAME MATCHES "DragonFly|FreeBSD")
 	pkg_check_modules(LIBUSB REQUIRED IMPORTED_TARGET libusb-1.0>=1.0 )
 	cmake_dependent_option(USE_SYSTEM_LIBUSB "Use system libusb-1.0 as shared library" ON
 			"LIBUSB_FOUND" OFF)
@@ -60,7 +64,10 @@ else()
 	cmake_dependent_option(USE_SYSTEM_LIBUSB "Use system libusb-1.0 as shared library" OFF
 			"LIBUSB_FOUND" OFF)
 endif()
-if(CMAKE_SYSTEM_NAME MATCHES "DragonFly|FreeBSD")
+if(RPCS3_IOS)
+	unset(LIBUSB_LIBRARIES CACHE)
+	add_subdirectory(libusb EXCLUDE_FROM_ALL)
+elseif(CMAKE_SYSTEM_NAME MATCHES "DragonFly|FreeBSD")
 	# Always use system libusb as reference implementation isn't supported
 	add_library(usb-1.0-shared INTERFACE)
 	target_link_libraries(usb-1.0-shared INTERFACE PkgConfig::LIBUSB)
@@ -156,7 +163,30 @@ endif()
 set(VULKAN_TARGET 3rdparty_dummy_lib)
 if(USE_VULKAN)
 	if(APPLE)
-		if(USE_SYSTEM_MVK)
+		if(RPCS3_IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+			if(NOT USE_SYSTEM_MVK)
+				message(FATAL_ERROR
+					"RPCS3: iOS Vulkan requires a caller-provided MoltenVK build. "
+					"Set USE_SYSTEM_MVK=ON, Vulkan_INCLUDE_DIR to a MoltenVK include directory, "
+					"and Vulkan_LIBRARY to the matching iPhoneOS or iPhoneSimulator library slice.")
+			endif()
+
+			if(NOT Vulkan_INCLUDE_DIR
+				OR NOT EXISTS "${Vulkan_INCLUDE_DIR}/vulkan/vulkan.h"
+				OR NOT EXISTS "${Vulkan_INCLUDE_DIR}/MoltenVK/mvk_vulkan.h")
+				message(FATAL_ERROR
+					"RPCS3: Vulkan_INCLUDE_DIR must contain both vulkan/vulkan.h and "
+					"MoltenVK/mvk_vulkan.h for an iOS Vulkan build.")
+			endif()
+
+			if(NOT Vulkan_LIBRARY OR NOT EXISTS "${Vulkan_LIBRARY}" OR IS_DIRECTORY "${Vulkan_LIBRARY}")
+				message(FATAL_ERROR
+					"RPCS3: Vulkan_LIBRARY must name the MoltenVK library file for the "
+					"selected iPhoneOS or iPhoneSimulator SDK (for example, libMoltenVK.a).")
+			endif()
+
+			message(STATUS "RPCS3: Using caller-provided MoltenVK for iOS")
+		elseif(USE_SYSTEM_MVK)
 			message(STATUS "RPCS3: Using system MoltenVK")
 		else()
 			message(STATUS "RPCS3: MoltenVK submodule")
@@ -187,6 +217,28 @@ if(USE_VULKAN)
 		add_library(3rdparty_vulkan INTERFACE)
 		target_compile_definitions(3rdparty_vulkan INTERFACE -DHAVE_VULKAN)
 		target_link_libraries(3rdparty_vulkan INTERFACE Vulkan::Vulkan)
+
+		if(APPLE)
+			find_library(RPCS3_MVK_METAL_FRAMEWORK Metal REQUIRED)
+			find_library(RPCS3_MVK_FOUNDATION_FRAMEWORK Foundation REQUIRED)
+			find_library(RPCS3_MVK_QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
+			find_library(RPCS3_MVK_COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
+			find_library(RPCS3_MVK_IOSURFACE_FRAMEWORK IOSurface REQUIRED)
+
+			target_link_libraries(3rdparty_vulkan INTERFACE
+				${RPCS3_MVK_METAL_FRAMEWORK}
+				${RPCS3_MVK_FOUNDATION_FRAMEWORK}
+				${RPCS3_MVK_QUARTZCORE_FRAMEWORK}
+				${RPCS3_MVK_COREGRAPHICS_FRAMEWORK}
+				${RPCS3_MVK_IOSURFACE_FRAMEWORK})
+
+			if(RPCS3_IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+				find_library(RPCS3_MVK_UI_FRAMEWORK UIKit REQUIRED)
+			else()
+				find_library(RPCS3_MVK_UI_FRAMEWORK AppKit REQUIRED)
+			endif()
+			target_link_libraries(3rdparty_vulkan INTERFACE ${RPCS3_MVK_UI_FRAMEWORK})
+		endif()
 
 		if(UNIX AND NOT APPLE AND NOT ANDROID)
 			find_package(Wayland)
@@ -278,7 +330,86 @@ set_property(TARGET ${FAUDIO_TARGET} PROPERTY FOLDER "3rdparty/")
 
 
 # FFMPEG
-if(NOT ANDROID)
+if(RPCS3_IOS)
+	set(RPCS3_IOS_FFMPEG_ROOT "" CACHE PATH
+		"Prefix containing target-built FFmpeg include/ and lib/ directories")
+	if(NOT RPCS3_IOS_FFMPEG_ROOT)
+		message(FATAL_ERROR
+			"An iOS FFmpeg build is required. Set RPCS3_IOS_FFMPEG_ROOT to a ${RPCS3_IOS_PLATFORM}-compatible prefix containing include/ and lib/*.a. The macOS prebuilt is not compatible with iOS.")
+	endif()
+
+	set(RPCS3_IOS_FFMPEG_LIBRARIES)
+	foreach(FFMPEG_COMPONENT avformat avcodec swscale swresample avutil)
+		set(FFMPEG_COMPONENT_LIBRARY "${RPCS3_IOS_FFMPEG_ROOT}/lib/lib${FFMPEG_COMPONENT}.a")
+		if(NOT EXISTS "${FFMPEG_COMPONENT_LIBRARY}")
+			message(FATAL_ERROR "Missing iOS FFmpeg library: ${FFMPEG_COMPONENT_LIBRARY}")
+		endif()
+		list(APPEND RPCS3_IOS_FFMPEG_LIBRARIES "${FFMPEG_COMPONENT_LIBRARY}")
+	endforeach()
+	if(NOT EXISTS "${RPCS3_IOS_FFMPEG_ROOT}/include/libavcodec/avcodec.h")
+		message(FATAL_ERROR "Missing iOS FFmpeg headers under ${RPCS3_IOS_FFMPEG_ROOT}/include")
+	endif()
+
+	# arm64 alone is ambiguous on Apple platforms. Inspect an archive member so
+	# an iPhoneOS library cannot accidentally enter an iPhoneSimulator build (or
+	# vice versa) and defer the failure until the final link.
+	set(FFMPEG_PLATFORM_CHECK_DIR "${CMAKE_BINARY_DIR}/CMakeFiles/rpcs3-ffmpeg-platform-check")
+	file(REMOVE_RECURSE "${FFMPEG_PLATFORM_CHECK_DIR}")
+	file(MAKE_DIRECTORY "${FFMPEG_PLATFORM_CHECK_DIR}")
+	execute_process(
+		COMMAND "${CMAKE_AR}" -t "${RPCS3_IOS_FFMPEG_ROOT}/lib/libavcodec.a"
+		OUTPUT_VARIABLE FFMPEG_ARCHIVE_MEMBERS
+		RESULT_VARIABLE FFMPEG_AR_LIST_RESULT
+		OUTPUT_STRIP_TRAILING_WHITESPACE)
+	if(NOT FFMPEG_AR_LIST_RESULT EQUAL 0)
+		message(FATAL_ERROR "Unable to inspect ${RPCS3_IOS_FFMPEG_ROOT}/lib/libavcodec.a")
+	endif()
+	string(REPLACE "\n" ";" FFMPEG_ARCHIVE_MEMBERS "${FFMPEG_ARCHIVE_MEMBERS}")
+	list(FILTER FFMPEG_ARCHIVE_MEMBERS INCLUDE REGEX "\\.o$")
+	list(LENGTH FFMPEG_ARCHIVE_MEMBERS FFMPEG_ARCHIVE_MEMBER_COUNT)
+	if(FFMPEG_ARCHIVE_MEMBER_COUNT EQUAL 0)
+		message(FATAL_ERROR "The FFmpeg avcodec archive contains no inspectable Mach-O object files")
+	endif()
+	list(GET FFMPEG_ARCHIVE_MEMBERS 0 FFMPEG_ARCHIVE_MEMBER)
+	execute_process(
+		COMMAND "${CMAKE_AR}" -x "${RPCS3_IOS_FFMPEG_ROOT}/lib/libavcodec.a" "${FFMPEG_ARCHIVE_MEMBER}"
+		WORKING_DIRECTORY "${FFMPEG_PLATFORM_CHECK_DIR}"
+		RESULT_VARIABLE FFMPEG_AR_EXTRACT_RESULT)
+	if(NOT FFMPEG_AR_EXTRACT_RESULT EQUAL 0)
+		message(FATAL_ERROR "Unable to extract an object from the FFmpeg avcodec archive")
+	endif()
+	find_program(RPCS3_VTOOL_EXECUTABLE vtool REQUIRED)
+	execute_process(
+		COMMAND "${RPCS3_VTOOL_EXECUTABLE}" -show-build "${FFMPEG_PLATFORM_CHECK_DIR}/${FFMPEG_ARCHIVE_MEMBER}"
+		OUTPUT_VARIABLE FFMPEG_BUILD_VERSION
+		RESULT_VARIABLE FFMPEG_VTOOL_RESULT)
+	if(RPCS3_IOS_PLATFORM STREQUAL "simulator")
+		set(FFMPEG_EXPECTED_PLATFORM "IOSSIMULATOR")
+	else()
+		set(FFMPEG_EXPECTED_PLATFORM "IOS")
+	endif()
+	if(NOT FFMPEG_VTOOL_RESULT EQUAL 0
+		OR NOT FFMPEG_BUILD_VERSION MATCHES "platform[ \t]+${FFMPEG_EXPECTED_PLATFORM}([ \r\n]|$)")
+		message(FATAL_ERROR
+			"RPCS3_IOS_FFMPEG_ROOT does not contain ${RPCS3_IOS_PLATFORM} libraries (expected LC_BUILD_VERSION platform ${FFMPEG_EXPECTED_PLATFORM}).")
+	endif()
+	file(REMOVE_RECURSE "${FFMPEG_PLATFORM_CHECK_DIR}")
+
+	add_library(3rdparty_ffmpeg INTERFACE)
+	target_include_directories(3rdparty_ffmpeg SYSTEM INTERFACE
+		"${RPCS3_IOS_FFMPEG_ROOT}/include")
+	target_link_libraries(3rdparty_ffmpeg INTERFACE
+		${RPCS3_IOS_FFMPEG_LIBRARIES}
+		bz2
+		iconv
+		z
+		"-framework AudioToolbox"
+		"-framework CoreFoundation"
+		"-framework CoreMedia"
+		"-framework CoreVideo"
+		"-framework Security"
+		"-framework VideoToolbox")
+elseif(NOT ANDROID)
 	add_library(3rdparty_ffmpeg INTERFACE)
 
 	# Select the version of ffmpeg to use, default is builtin

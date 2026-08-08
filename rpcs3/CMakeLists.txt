@@ -24,11 +24,34 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
 endif()
 
 if (NOT ANDROID)
+    if(RPCS3_IOS)
+        set(RPCS3_IOS_QT_ROOT "" CACHE PATH
+            "Prefix of a Qt build targeting the selected iOS SDK")
+        set(RPCS3_IOS_QT_HOST_PATH "" CACHE PATH
+            "Prefix of the matching host Qt tools used by the iOS Qt build")
+
+        if(NOT RPCS3_IOS_QT_ROOT)
+            message(FATAL_ERROR
+                "Qt for iOS is required. Set RPCS3_IOS_QT_ROOT to a ${RPCS3_IOS_PLATFORM}-compatible Qt prefix; a Homebrew macOS Qt installation cannot be used.")
+        endif()
+        list(PREPEND CMAKE_PREFIX_PATH "${RPCS3_IOS_QT_ROOT}")
+        list(PREPEND CMAKE_FIND_ROOT_PATH "${RPCS3_IOS_QT_ROOT}")
+        if(RPCS3_IOS_QT_HOST_PATH)
+            set(QT_HOST_PATH "${RPCS3_IOS_QT_HOST_PATH}" CACHE PATH
+                "Host Qt tools for the iOS cross-build" FORCE)
+        endif()
+    endif()
+
     # Qt
     # finds Qt libraries and setups custom commands for MOC and UIC
     # Must be done here because generated MOC and UIC targets cant
     # be found otherwise
     include(${CMAKE_SOURCE_DIR}/3rdparty/qt6.cmake)
+
+    if(RPCS3_IOS AND NOT QT_QMAKE_TARGET_MKSPEC MATCHES "ios")
+        message(FATAL_ERROR
+            "RPCS3_IOS_QT_ROOT resolved to Qt target mkspec '${QT_QMAKE_TARGET_MKSPEC}', not an iOS Qt build (expected a mkspec such as macx-ios-clang).")
+    endif()
 endif()
 
 # subdirectories
@@ -102,6 +125,43 @@ if (NOT ANDROID)
     if(WIN32)
         target_sources(rpcs3 PRIVATE rpcs3.rc)
         target_compile_definitions(rpcs3 PRIVATE UNICODE _UNICODE)
+    elseif(RPCS3_IOS)
+        set(RPCS3_IOS_BUNDLE_IDENTIFIER "org.rpcs3.ios" CACHE STRING
+            "Bundle identifier for the iOS application")
+        set(RPCS3_IOS_BUNDLE_VERSION "1" CACHE STRING
+            "Monotonically increasing iOS bundle build number")
+        set(RPCS3_IOS_SHORT_VERSION "0.0.1" CACHE STRING
+            "User-visible iOS bundle version")
+        set(RPCS3_IOS_ENTITLEMENTS_FILE
+            "${CMAKE_CURRENT_SOURCE_DIR}/rpcs3_ios.entitlements" CACHE FILEPATH
+            "Entitlements plist used when signing the iOS application")
+        set(RPCS3_IOS_DEVELOPMENT_TEAM "" CACHE STRING
+            "Optional Apple development team identifier for Xcode-generated builds")
+
+        if(NOT EXISTS "${RPCS3_IOS_ENTITLEMENTS_FILE}")
+            message(FATAL_ERROR
+                "RPCS3_IOS_ENTITLEMENTS_FILE does not exist: ${RPCS3_IOS_ENTITLEMENTS_FILE}")
+        endif()
+
+        set_target_properties(rpcs3 PROPERTIES
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/rpcs3_ios.plist.in"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "${RPCS3_IOS_BUNDLE_IDENTIFIER}"
+            MACOSX_BUNDLE_BUNDLE_NAME "RPCS3"
+            MACOSX_BUNDLE_BUNDLE_VERSION "${RPCS3_IOS_BUNDLE_VERSION}"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "${RPCS3_IOS_SHORT_VERSION}"
+            XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${RPCS3_IOS_ENTITLEMENTS_FILE}"
+            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${RPCS3_IOS_BUNDLE_IDENTIFIER}"
+            XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "iphoneos iphonesimulator"
+            XCODE_ATTRIBUTE_SUPPORTS_MACCATALYST "NO"
+            XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2")
+        if(RPCS3_IOS_DEVELOPMENT_TEAM)
+            set_target_properties(rpcs3 PROPERTIES
+                XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${RPCS3_IOS_DEVELOPMENT_TEAM}")
+        endif()
+
+        target_link_libraries(rpcs3 PRIVATE
+            "-framework Foundation"
+            "-framework UIKit")
     elseif(APPLE)
         target_sources(rpcs3 PRIVATE rpcs3.icns update_helper.sh)
         set_source_files_properties(update_helper.sh PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
@@ -125,7 +185,15 @@ if (NOT ANDROID)
     endif()
 
     # Copy icons to executable directory
-    if(APPLE)
+    if(RPCS3_IOS)
+        qt_finalize_target(rpcs3)
+        add_custom_command(TARGET rpcs3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${CMAKE_SOURCE_DIR}/bin/Icons $<TARGET_BUNDLE_DIR:rpcs3>/Icons
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${CMAKE_SOURCE_DIR}/bin/GuiConfigs $<TARGET_BUNDLE_DIR:rpcs3>/GuiConfigs
+            VERBATIM)
+    elseif(APPLE)
         qt_finalize_target(rpcs3)
         add_custom_command(TARGET rpcs3 POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/rpcs3.icns $<TARGET_FILE_DIR:rpcs3>/../Resources/rpcs3.icns

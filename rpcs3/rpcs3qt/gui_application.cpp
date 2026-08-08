@@ -54,8 +54,14 @@
 
 #include <clocale>
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
 #include "Emu/RSX/Null/NullGSRender.h"
+#ifndef WITHOUT_OPENGL
 #include "Emu/RSX/GL/GLGSRender.h"
+#endif
 
 #if defined(HAVE_VULKAN)
 #include "Emu/RSX/VK/VKGSRender.h"
@@ -141,7 +147,7 @@ bool gui_application::Init()
 		}
 	}
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
 	if (!m_render_creator->Vulkan.supported)
 	{
 		QMessageBox::warning(nullptr,

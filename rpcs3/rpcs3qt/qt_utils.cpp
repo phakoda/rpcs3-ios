@@ -10,6 +10,10 @@
 #include <QScreen>
 #include <QUrl>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 #include "Emu/system_utils.hpp"
 #include "Utilities/File.h"
 #include "Loader/ISO.h"
@@ -484,7 +488,7 @@ namespace gui
 				{
 					gui_log.error("gui::utils::open_dir: Failed to start explorer process");
 				}
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) && TARGET_OS_OSX
 				gui_log.notice("gui::utils::open_dir: About to open file path '%s'", spath);
 
 				QProcess::execute("/usr/bin/osascript", { "-e", "tell application \"Finder\" to reveal POSIX file \"" + path + "\"" });

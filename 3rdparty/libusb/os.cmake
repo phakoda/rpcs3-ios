@@ -37,11 +37,20 @@ elseif(WIN32)
 
 	list(APPEND PLATFORM_SRC threads_windows.c)
 elseif (APPLE)
-	# Apple != OSX alone
+	# Apple != macOS alone. iOS does not expose the macOS IOKit USB API,
+	# so retain libusb's API surface with its upstream null backend.
 	add_compile_definitions(PLATFORM_POSIX=1 HAVE_CLOCK_GETTIME)
-	set(OS_DARWIN 1)
 
-	if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+	if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+		set(PLATFORM_SRC
+			null_usb.c
+			threads_posix.c
+			events_posix.c
+		)
+		set(LIBUSB_IOS_CLOCK_SOURCE "${CMAKE_CURRENT_LIST_DIR}/ios_clock.c")
+	else()
+		set(OS_DARWIN 1)
+
 		set(PLATFORM_SRC
 			darwin_usb.c
 			threads_posix.c
@@ -102,6 +111,9 @@ endif()
 foreach(SRC IN LISTS PLATFORM_SRC)
 	list(APPEND LIBUSB_PLATFORM ${LIBUSB_SOURCE_DIR}/libusb/os/${SRC})
 endforeach()
+if(LIBUSB_IOS_CLOCK_SOURCE)
+	list(APPEND LIBUSB_PLATFORM "${LIBUSB_IOS_CLOCK_SOURCE}")
+endif()
 
 # export one level up so that the generic
 # libusb parts know what the platform bits are supposed to be

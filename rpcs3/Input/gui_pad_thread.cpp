@@ -23,15 +23,18 @@
 #include <unistd.h>
 #define CHECK_IOCTRL_RET(res) if (res == -1) { gui_log.error("gui_pad_thread: ioctl failed (errno=%d=%s)", res, strerror(errno)); }
 #elif defined(__APPLE__)
-#pragma GCC diagnostic push
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
+	#pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #pragma GCC diagnostic ignored "-Wmissing-declarations"
 #pragma GCC diagnostic ignored "-Wnullability-completeness"
 #pragma GCC diagnostic ignored "-Wdeprecated-anon-enum-enum-conversion"
 #include <ApplicationServices/ApplicationServices.h>
-#include <Carbon/Carbon.h>
-#pragma GCC diagnostic pop
+	#include <Carbon/Carbon.h>
+	#pragma GCC diagnostic pop
+#endif
 #endif
 
 #include <QApplication>
@@ -367,7 +370,7 @@ void gui_pad_thread::process_input()
 		case pad_button::cross: key = KEY_ENTER; break;
 		case pad_button::square: key = KEY_BACKSPACE; break;
 		case pad_button::triangle: key = KEY_TAB; break;
-#elif defined (__APPLE__)
+	#elif defined(__APPLE__) && TARGET_OS_OSX
 		case pad_button::dpad_up: key = kVK_UpArrow; break;
 		case pad_button::dpad_down: key = kVK_DownArrow; break;
 		case pad_button::dpad_left: key = kVK_LeftArrow; break;
@@ -652,7 +655,7 @@ void gui_pad_thread::send_key_event(u32 key, bool pressed)
 #elif defined(__linux__)
 	emit_event(EV_KEY, key, pressed ? 1 : 0);
 	emit_event(EV_SYN, SYN_REPORT, 0);
-#elif defined(__APPLE__)
+	#elif defined(__APPLE__) && TARGET_OS_OSX
 	CGEventRef ev = CGEventCreateKeyboardEvent(NULL, static_cast<CGKeyCode>(key), pressed);
 	if (!ev)
 	{
@@ -698,7 +701,7 @@ void gui_pad_thread::send_mouse_button_event(mouse_button btn, bool pressed)
 
 	emit_event(EV_KEY, key, pressed ? 1 : 0);
 	emit_event(EV_SYN, SYN_REPORT, 0);
-#elif defined(__APPLE__)
+	#elif defined(__APPLE__) && TARGET_OS_OSX
 	CGEventType type{};
 	CGMouseButton mouse_btn{};
 
@@ -768,7 +771,7 @@ void gui_pad_thread::send_mouse_wheel_event(mouse_wheel wheel, int delta)
 
 	emit_event(EV_REL, axis, delta);
 	emit_event(EV_SYN, SYN_REPORT, 0);
-#elif defined(__APPLE__)
+	#elif defined(__APPLE__) && TARGET_OS_OSX
 	int v_delta = 0;
 	int h_delta = 0;
 
@@ -816,7 +819,7 @@ void gui_pad_thread::send_mouse_move_event(int delta_x, int delta_y)
 	if (delta_x) emit_event(EV_REL, REL_X, delta_x);
 	if (delta_y) emit_event(EV_REL, REL_Y, delta_y);
 	emit_event(EV_SYN, SYN_REPORT, 0);
-#elif defined(__APPLE__)
+	#elif defined(__APPLE__) && TARGET_OS_OSX
 	CGDirectDisplayID display = CGMainDisplayID();
 	const usz width = CGDisplayPixelsWide(display);
 	const usz height = CGDisplayPixelsHigh(display);
