@@ -26,12 +26,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate entitlement plists
+      - name: Validate callback JIT signing profile
         shell: bash
         run: |
           set -euo pipefail
           plutil -lint rpcs3/ios/JIT.entitlements
           plutil -lint rpcs3/ios/Research.entitlements
+
+          for key in \
+            dynamic-codesigning \
+            com.apple.developer.kernel.extended-virtual-addressing \
+            com.apple.developer.cs.allow-jit \
+            com.apple.security.cs.jit-write-allowlist; do
+            test "$(/usr/libexec/PlistBuddy -c "Print :${key}" rpcs3/ios/JIT.entitlements)" = true
+          done
+
+          grep -F 'XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS' rpcs3/ios/ApplyRuntimeOverrides.cmake
+          grep -F 'RPCS3_IOS_ENABLE_JIT_ENTITLEMENTS' rpcs3/ios/ApplyRuntimeOverrides.cmake
+          grep -F 'RPCS3_IOS_ENTITLEMENTS_FILE' rpcs3/ios/ApplyRuntimeOverrides.cmake
 
       - name: Compile iPhoneOS and Simulator callback probes
         shell: bash
