@@ -9,6 +9,7 @@ on:
       - 'rpcs3/rpcs3_ios.entitlements'
       - 'Utilities/JIT.h'
       - 'Utilities/JITASM.cpp'
+      - 'Utilities/JIT_iOS.cpp'
       - 'rpcs3/util/vm_native*.cpp'
       - 'buildfiles/ios/**'
       - '.github/workflows/ios-jit-smoke.yml'
@@ -38,12 +39,12 @@ jobs:
           set -euo pipefail
           zsh buildfiles/ios/probe_jit_callback.sh --output "$RUNNER_TEMP/rpcs3-ios-jit-probe"
 
-      - name: Validate deferred iOS VM override wiring
+      - name: Validate deferred iOS runtime override wiring
         shell: bash
         run: |
           set -euo pipefail
           test_root="$RUNNER_TEMP/rpcs3-ios-cmake-hook"
-          mkdir -p "$test_root/rpcs3/Emu" "$test_root/rpcs3/util" "$test_root/buildfiles/ios"
+          mkdir -p "$test_root/rpcs3/Emu" "$test_root/rpcs3/util" "$test_root/Utilities" "$test_root/buildfiles/ios"
           cp buildfiles/ios/runtime_overrides.cmake "$test_root/buildfiles/ios/runtime_overrides.cmake"
 
           cat > "$test_root/CMakeLists.txt" <<'EOF'
@@ -55,11 +56,13 @@ jobs:
           EOF
 
           cat > "$test_root/rpcs3/Emu/CMakeLists.txt" <<'EOF'
-          add_library(rpcs3_emu STATIC ../util/vm_native.cpp)
+          add_library(rpcs3_emu STATIC ../util/vm_native.cpp ../../Utilities/JITASM.cpp)
           EOF
 
           printf '%s\n' 'void memory_decommit() {}' > "$test_root/rpcs3/util/vm_native.cpp"
           printf '%s\n' 'void memory_decommit_ios() {}' > "$test_root/rpcs3/util/vm_native_ios.cpp"
+          printf '%s\n' 'void jit_asm() {}' > "$test_root/Utilities/JITASM.cpp"
+          printf '%s\n' 'void jit_ios() {}' > "$test_root/Utilities/JIT_iOS.cpp"
 
           cmake -S "$test_root" -B "$test_root/build" -G Ninja \
             -DCMAKE_PROJECT_hooktest_INCLUDE="$test_root/buildfiles/ios/runtime_overrides.cmake"
@@ -70,9 +73,12 @@ jobs:
           import sys
 
           commands = json.load(open(sys.argv[1], encoding='utf-8'))
-          native = next(item for item in commands if item['file'].endswith('/vm_native.cpp'))
-          ios = next(item for item in commands if item['file'].endswith('/vm_native_ios.cpp'))
-          define = '-Dmemory_decommit=memory_decommit_platform'
-          assert define in native['command'], native['command']
-          assert define not in ios['command'], ios['command']
+          by_name = {item['file'].rsplit('/', 1)[-1]: item for item in commands}
+          decommit_define = '-Dmemory_decommit=memory_decommit_platform'
+          callback_define = '-Dpthread_jit_write_with_callback_np=rpcs3_ios_pthread_jit_write_with_callback_np'
+
+          assert decommit_define in by_name['vm_native.cpp']['command'], by_name['vm_native.cpp']['command']
+          assert decommit_define not in by_name['vm_native_ios.cpp']['command'], by_name['vm_native_ios.cpp']['command']
+          assert callback_define in by_name['JITASM.cpp']['command'], by_name['JITASM.cpp']['command']
+          assert callback_define not in by_name['JIT_iOS.cpp']['command'], by_name['JIT_iOS.cpp']['command']
           PY
