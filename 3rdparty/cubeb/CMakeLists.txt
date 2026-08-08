@@ -8,6 +8,13 @@ set(BUNDLE_SPEEX TRUE CACHE BOOL "Bundle the speex library")
 set(LAZY_LOAD_LIBS TRUE CACHE BOOL "Lazily load shared libraries")
 set(USE_SANITIZERS FALSE CACHE BOOL "Dont't use sanitizers")
 
+if(RPCS3_IOS)
+	# Cubeb's CoreAudio backend still depends on macOS-only AudioHardware
+	# device APIs. Keep the API library available so RPCS3 can fall back to
+	# its NullAudioBackend until Cubeb has a complete AVAudioSession path.
+	set(USE_AUDIOUNIT OFF CACHE BOOL "Disable Cubeb's macOS AudioUnit backend on iOS" FORCE)
+endif()
+
 add_subdirectory(cubeb EXCLUDE_FROM_ALL)
 add_library(3rdparty::cubeb ALIAS cubeb)
 
