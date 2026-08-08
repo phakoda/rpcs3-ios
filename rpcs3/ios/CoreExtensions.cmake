@@ -102,3 +102,4 @@ if(TARGET rpcs3_ios_core_link AND TARGET rpcs3_ios_core_framework)
 endif()
 
 include("${CMAKE_SOURCE_DIR}/rpcs3/ios/PatchCoreHost.cmake")
+include("${CMAKE_SOURCE_DIR}/rpcs3/ios/PatchCoreHostRuntime.cmake")
