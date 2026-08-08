@@ -12,7 +12,7 @@ find_library(IOS_PLATFORM_METAL Metal REQUIRED)
 find_library(IOS_PLATFORM_SECURITY Security REQUIRED)
 find_library(IOS_PLATFORM_UNIFORMTYPES UniformTypeIdentifiers REQUIRED)
 
-add_library(rpcs3_ios_platform STATIC
+set(_rpcs3_ios_platform_objcxx_sources
     IOSPlatform.mm
     IOSJIT.mm
     IOSJITProvider.mm
@@ -22,9 +22,20 @@ add_library(rpcs3_ios_platform STATIC
     IOSExternalDisplay.mm
     IOSMoltenVK.mm
     IOSDiagnostics.mm
-    IOSTouchController.mm
+    IOSTouchController.mm)
+
+add_library(rpcs3_ios_platform STATIC
+    ${_rpcs3_ios_platform_objcxx_sources}
     IOSVirtualController.cpp
 )
+
+# Xcode maps C++ and Objective-C++ warning settings through the same build
+# setting in places, so a COMPILE_LANGUAGE generator expression is not enough
+# to keep -Werror=old-style-cast away from UIKit/Foundation bridge idioms.
+# Relax only this style warning on concrete .mm sources; RPCS3's C++ core keeps
+# the strict warning policy.
+set_source_files_properties(${_rpcs3_ios_platform_objcxx_sources} PROPERTIES
+    COMPILE_OPTIONS "-Wno-error=old-style-cast")
 
 target_compile_features(rpcs3_ios_platform PUBLIC cxx_std_20)
 target_include_directories(rpcs3_ios_platform PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
