@@ -1,0 +1,38 @@
+name: iOS JIT smoke
+
+on:
+  push:
+    branches:
+      - agent/ios-vphone-runtime
+    paths:
+      - 'rpcs3/rpcs3_ios.entitlements'
+      - 'Utilities/JIT.h'
+      - 'Utilities/JITASM.cpp'
+      - 'rpcs3/util/vm_native.cpp'
+      - 'buildfiles/ios/**'
+      - '.github/workflows/ios-jit-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  jit-callback-build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate app entitlements
+        shell: zsh {0}
+        run: |
+          set -euo pipefail
+          plutil -lint rpcs3/rpcs3_ios.entitlements
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.kernel.extended-virtual-addressing' rpcs3/rpcs3_ios.entitlements | grep -qx 'true'
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.cs.allow-jit' rpcs3/rpcs3_ios.entitlements | grep -qx 'true'
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.jit-write-allowlist' rpcs3/rpcs3_ios.entitlements | grep -qx 'true'
+
+      - name: Compile iPhoneOS and Simulator JIT callback probes
+        shell: zsh {0}
+        run: |
+          set -euo pipefail
+          zsh buildfiles/ios/probe_jit_callback.sh --output "$RUNNER_TEMP/rpcs3-ios-jit-probe"
