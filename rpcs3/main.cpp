@@ -27,6 +27,19 @@ namespace
 {
 	std::terminate_handler s_previous_terminate_handler{};
 
+	void flush_ios_fatal_logs() noexcept
+	{
+		try
+		{
+			logs::listener::sync_all();
+		}
+		catch (...)
+		{
+		}
+
+		std::fflush(nullptr);
+	}
+
 	[[noreturn]] void ios_terminate_handler() noexcept
 	{
 		try
@@ -76,14 +89,12 @@ namespace
 				thread_name, native_thread_id, emulator_state, boot_path, title_id, exception_type, exception_text);
 
 			sys_log.fatal("%s", report);
-			logs::listener::sync_all();
-			std::fflush(nullptr);
+			flush_ios_fatal_logs();
 			report_fatal_error(report, false, true);
 		}
 		catch (...)
 		{
-			logs::listener::sync_all();
-			std::fflush(nullptr);
+			flush_ios_fatal_logs();
 			if (s_previous_terminate_handler && s_previous_terminate_handler != ios_terminate_handler)
 			{
 				s_previous_terminate_handler();
