@@ -1,0 +1,172 @@
+name: iOS JIT smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'agent/ios-bootstrap'
+    paths:
+      - '.github/workflows/ios-jit-smoke.yml'
+      - 'Utilities/JITASM.cpp'
+      - 'Utilities/JIT_iOS.cpp'
+      - 'rpcs3/util/vm_native_ios.cpp'
+      - 'rpcs3/ios/ApplyRuntimeOverrides.cmake'
+      - 'rpcs3/ios/JIT.entitlements'
+      - 'rpcs3/ios/Research.entitlements'
+
+permissions:
+  contents: read
+
+jobs:
+  callback-contract:
+    name: Compile callback JIT contract
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate entitlement plists
+        shell: bash
+        run: |
+          set -euo pipefail
+          plutil -lint rpcs3/ios/JIT.entitlements
+          plutil -lint rpcs3/ios/Research.entitlements
+
+      - name: Compile iPhoneOS and Simulator callback probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe="${RUNNER_TEMP}/jit_callback_probe.cpp"
+          cat >"${probe}" <<'CPP'
+          #include <TargetConditionals.h>
+          #include <libkern/OSCacheControl.h>
+          #include <pthread.h>
+          #include <sys/mman.h>
+          #include <unistd.h>
+
+          #include <cstddef>
+          #include <cstdint>
+          #include <cstring>
+
+          #if !defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE || !defined(__aarch64__)
+          #error This probe must target arm64 iOS or arm64 iOS Simulator.
+          #endif
+
+          namespace
+          {
+          struct copy_context
+          {
+              void* dst;
+              const void* src;
+              std::size_t size;
+          };
+
+          int copy_callback(void* opaque) noexcept
+          {
+              const auto* context = static_cast<const copy_context*>(opaque);
+              if (!context || !context->dst || !context->src || !context->size)
+              {
+                  return -1;
+              }
+              std::memcpy(context->dst, context->src, context->size);
+              return 0;
+          }
+
+          PTHREAD_JIT_WRITE_ALLOW_CALLBACKS_NP(copy_callback);
+          }
+
+          int main()
+          {
+              if (__builtin_available(iOS 17.4, *))
+              {
+                  const std::size_t page_size = static_cast<std::size_t>(getpagesize());
+                  void* mapping = mmap(nullptr, page_size, PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
+                  if (mapping == MAP_FAILED)
+                  {
+                      return 10;
+                  }
+
+                  alignas(16) constexpr std::uint32_t code[]{
+                      0x52800540u, // mov w0, #42
+                      0xd65f03c0u, // ret
+                      0xd503201fu,
+                      0xd503201fu,
+                  };
+                  copy_context context{mapping, code, sizeof(code)};
+                  if (pthread_jit_write_with_callback_np(copy_callback, &context) != 0)
+                  {
+                      return 11;
+                  }
+                  sys_icache_invalidate(mapping, sizeof(code));
+                  munmap(mapping, page_size);
+                  return 0;
+              }
+              return 9;
+          }
+          CPP
+
+          device_sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
+          simulator_sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+
+          xcrun --sdk iphoneos clang++ \
+            -std=c++20 -arch arm64 -miphoneos-version-min=17.4 \
+            -isysroot "${device_sdk}" "${probe}" \
+            -o "${RUNNER_TEMP}/jit-callback-iphoneos"
+          xcrun --sdk iphonesimulator clang++ \
+            -std=c++20 -arch arm64 -mios-simulator-version-min=17.4 \
+            -isysroot "${simulator_sdk}" "${probe}" \
+            -o "${RUNNER_TEMP}/jit-callback-iphonesimulator"
+
+          test "$(xcrun vtool -show-build "${RUNNER_TEMP}/jit-callback-iphoneos" | awk '/^[[:space:]]*platform / {print $2; exit}')" = IOS
+          test "$(xcrun vtool -show-build "${RUNNER_TEMP}/jit-callback-iphonesimulator" | awk '/^[[:space:]]*platform / {print $2; exit}')" = IOSSIMULATOR
+
+      - name: Validate bootstrap runtime override wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/runtime-override-contract"
+          mkdir -p "${root}/rpcs3/ios" "${root}/rpcs3/util" "${root}/Utilities"
+          cp rpcs3/ios/ApplyRuntimeOverrides.cmake "${root}/rpcs3/ios/ApplyRuntimeOverrides.cmake"
+
+          cat >"${root}/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.28)
+          project(runtime_override_contract LANGUAGES CXX)
+          set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+          set(RPCS3_IOS ON)
+          file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/ios-generated")
+          file(WRITE "${CMAKE_BINARY_DIR}/ios-generated/vm_native_ios.cpp" "void memory_decommit() {}\n")
+          add_library(rpcs3_emu STATIC
+              "${CMAKE_BINARY_DIR}/ios-generated/vm_native_ios.cpp"
+              "${CMAKE_SOURCE_DIR}/Utilities/JITASM.cpp")
+          include("${CMAKE_SOURCE_DIR}/rpcs3/ios/ApplyRuntimeOverrides.cmake")
+          CMAKE
+
+          printf '%s\n' 'void jit_asm() {}' >"${root}/Utilities/JITASM.cpp"
+          printf '%s\n' 'void jit_ios() {}' >"${root}/Utilities/JIT_iOS.cpp"
+          printf '%s\n' 'void decommit_ios() {}' >"${root}/rpcs3/util/vm_native_ios.cpp"
+
+          cmake -S "${root}" -B "${root}/build" -G Ninja
+
+          python3 - "${root}/build/compile_commands.json" <<'PY'
+          import json
+          import sys
+
+          commands = json.load(open(sys.argv[1], encoding='utf-8'))
+          by_name = {}
+          for item in commands:
+              by_name.setdefault(item['file'].rsplit('/', 1)[-1], []).append(item['command'])
+
+          platform_vm = next(command for command in by_name['vm_native_ios.cpp']
+                             if 'memory_decommit=memory_decommit_platform' in command)
+          shim_vm = next(command for command in by_name['vm_native_ios.cpp']
+                         if 'memory_decommit=memory_decommit_platform' not in command)
+          jit_asm = by_name['JITASM.cpp'][0]
+          jit_shim = by_name['JIT_iOS.cpp'][0]
+
+          assert 'memory_decommit=memory_decommit_platform' in platform_vm
+          assert 'memory_decommit=memory_decommit_platform' not in shim_vm
+          assert 'pthread_jit_write_with_callback_np=rpcs3_ios_pthread_jit_write_with_callback_np' in jit_asm
+          assert 'pthread_jit_write_with_callback_np=rpcs3_ios_pthread_jit_write_with_callback_np' not in jit_shim
+          PY
