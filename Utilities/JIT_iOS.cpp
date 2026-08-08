@@ -17,13 +17,7 @@ namespace
 
 	void sync_jit_failure_log() noexcept
 	{
-		try
-		{
-			logs::listener::sync_all();
-		}
-		catch (...)
-		{
-		}
+		logs::listener::sync_all();
 	}
 }
 
