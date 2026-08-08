@@ -3,6 +3,7 @@
 #include "util/logs.hpp"
 
 #include <TargetConditionals.h>
+#include <atomic>
 #include <cerrno>
 #include <sys/mman.h>
 
@@ -14,6 +15,11 @@ LOG_CHANNEL(vm_ios_log, "VM-IOS");
 
 namespace utils
 {
+	namespace
+	{
+		std::atomic_bool s_logged_jit_decommit_path{false};
+	}
+
 	// vm_native.cpp is compiled with memory_decommit renamed to this symbol for
 	// iOS preset builds. Non-JIT decommits continue through the original code.
 	void memory_decommit_platform(void* pointer, usz size, bool can_be_jit);
@@ -39,6 +45,13 @@ namespace utils
 		const uptr address = reinterpret_cast<uptr>(pointer);
 		void* const page_base = reinterpret_cast<void*>(address & -page_size);
 		const usz page_span = size + (address & (page_size - 1));
+		const bool callback_path = memory_uses_jit_write_callback();
+
+		if (!s_logged_jit_decommit_path.exchange(true, std::memory_order_relaxed))
+		{
+			vm_ios_log.notice("Preserving iOS JIT reservation during decommit (callback=%d, base=%p, size=0x%x)",
+				callback_path, page_base, page_span);
+		}
 
 #if defined(MADV_FREE)
 		constexpr int advice = MADV_FREE;
@@ -59,13 +72,13 @@ namespace utils
 			else
 			{
 				vm_ios_log.trace("JIT decommit preserved reservation %p+0x%x (callback=%d)",
-					page_base, page_span, memory_uses_jit_write_callback());
+					page_base, page_span, callback_path);
 			}
 		}
 		else
 		{
 			vm_ios_log.trace("JIT decommit preserved reservation %p+0x%x without page advice (callback=%d)",
-				page_base, page_span, memory_uses_jit_write_callback());
+				page_base, page_span, callback_path);
 		}
 	}
 }
