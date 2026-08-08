@@ -19,6 +19,10 @@
 
 #include <thread>
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
 LOG_CHANNEL(vm_log, "VM");
 
 void ppu_remove_hle_instructions(u32 addr, u32 size);
@@ -26,6 +30,12 @@ extern bool is_memory_compatible_for_copy_from_executable_optimization(u32 addr,
 
 namespace vm
 {
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+	static constexpr u64 c_hook_region_size = 0x400000000;
+#else
+	static constexpr u64 c_hook_region_size = 0x800000000;
+#endif
+
 	static u8* memory_reserve_4GiB(void* _addr, u64 size = 0x100000000, bool is_memory_mapping = false)
 	{
 		for (u64 addr = reinterpret_cast<u64>(_addr) + 0x100000000; addr < 0x8000'0000'0000; addr += 0x100000000)
@@ -49,7 +59,7 @@ namespace vm
 	u8* const g_exec_addr = memory_reserve_4GiB(g_sudo_addr, 0x300000000);
 
 	// Hooks for memory R/W interception (default: zero offset to some function with only ret instructions)
-	u8* const g_hook_addr = memory_reserve_4GiB(g_exec_addr, 0x800000000);
+	u8* const g_hook_addr = memory_reserve_4GiB(g_exec_addr, c_hook_region_size);
 
 	// Stats for debugging
 	u8* const g_stat_addr = memory_reserve_4GiB(g_hook_addr);
@@ -2225,7 +2235,7 @@ namespace vm
 
 	inline namespace ps3_
 	{
-		static utils::shm s_hook{0x800000000, ""};
+		static utils::shm s_hook{c_hook_region_size, ""};
 
 		void init()
 		{
@@ -2239,7 +2249,7 @@ namespace vm
 			g_base_addr, g_base_addr + 0xffff'ffff,
 			g_sudo_addr, g_sudo_addr + 0xffff'ffff,
 			g_exec_addr, g_exec_addr + 0x200000000 - 1,
-			g_hook_addr, g_hook_addr + 0x800000000 - 1,
+			g_hook_addr, g_hook_addr + c_hook_region_size - 1,
 			g_stat_addr, g_stat_addr + 0xffff'ffff,
 			g_reservations, g_reservations + sizeof(g_reservations) - 1);
 
@@ -2262,7 +2272,7 @@ namespace vm
 			std::memset(g_range_lock_bits, 0, sizeof(g_range_lock_bits));
 
 #ifdef _WIN32
-			utils::memory_release(g_hook_addr, 0x800000000);
+			utils::memory_release(g_hook_addr, c_hook_region_size);
 #endif
 			ensure(s_hook.map(g_hook_addr, utils::protection::rw, true));
 		}
@@ -2290,9 +2300,9 @@ namespace vm
 
 #ifdef _WIN32
 		s_hook.unmap(g_hook_addr);
-		ensure(utils::memory_reserve(0x800000000, g_hook_addr));
+		ensure(utils::memory_reserve(c_hook_region_size, g_hook_addr));
 #else
-		utils::memory_decommit(g_hook_addr, 0x800000000);
+		utils::memory_decommit(g_hook_addr, c_hook_region_size);
 #endif
 
 		std::memset(g_range_lock_set, 0, sizeof(g_range_lock_set));

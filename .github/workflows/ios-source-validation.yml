@@ -1,0 +1,229 @@
+name: iOS source validation
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ios-source-validation.yml'
+      - 'CMakeLists.txt'
+      - '3rdparty/ios.cmake'
+      - '3rdparty/ios/**'
+      - 'buildfiles/cmake/ConfigureIOS.cmake'
+      - 'buildfiles/ios/**'
+      - 'rpcs3/CMakeLists.txt'
+      - 'rpcs3/ios/**'
+      - 'rpcs3/Input/ios_gamecontroller_pad_handler.*'
+      - 'rpcs3/Emu/Io/pad_config*'
+      - 'rpcs3/rpcs3qt/CMakeLists.txt'
+      - 'BUILDING_IOS.md'
+      - 'PORTING_IOS.md'
+      - 'IOS_CORE_API.md'
+  push:
+    branches:
+      - 'agent/ios-bootstrap'
+    paths:
+      - '.github/workflows/ios-source-validation.yml'
+      - 'CMakeLists.txt'
+      - '3rdparty/ios.cmake'
+      - '3rdparty/ios/**'
+      - 'buildfiles/cmake/ConfigureIOS.cmake'
+      - 'buildfiles/ios/**'
+      - 'rpcs3/CMakeLists.txt'
+      - 'rpcs3/ios/**'
+      - 'rpcs3/Input/ios_gamecontroller_pad_handler.*'
+      - 'rpcs3/Emu/Io/pad_config*'
+      - 'rpcs3/rpcs3qt/CMakeLists.txt'
+      - 'BUILDING_IOS.md'
+      - 'PORTING_IOS.md'
+      - 'IOS_CORE_API.md'
+
+permissions:
+  contents: read
+
+jobs:
+  source-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Validate shell syntax
+        shell: bash
+        run: |
+          mkdir -p validation-logs
+          set +e
+          for helper in buildfiles/ios/*.sh; do
+            bash -n "$helper"
+          done 2>&1 | tee validation-logs/shell-syntax.log
+          status=${PIPESTATUS[0]}
+          echo "$status" > validation-logs/shell-syntax.status
+          exit 0
+
+      - name: Validate general iOS source contracts
+        shell: bash
+        run: |
+          set +e
+          python3 buildfiles/ios/validate_sources.py 2>&1 | tee validation-logs/general.log
+          status=${PIPESTATUS[0]}
+          echo "$status" > validation-logs/general.status
+          exit 0
+
+      - name: Validate core and final-link contracts
+        shell: bash
+        run: |
+          set +e
+          python3 buildfiles/ios/validate_core.py 2>&1 | tee validation-logs/core.log
+          status=${PIPESTATUS[0]}
+          echo "$status" > validation-logs/core.status
+          exit 0
+
+      - name: Validate native callback and management contracts
+        shell: bash
+        run: |
+          set +e
+          python3 buildfiles/ios/validate_callbacks.py 2>&1 | tee validation-logs/callbacks.log
+          status=${PIPESTATUS[0]}
+          echo "$status" > validation-logs/callbacks.status
+          exit 0
+
+      - name: Upload validator diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-source-validation-logs
+          path: validation-logs
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Enforce validator results
+        if: always()
+        shell: bash
+        run: |
+          failed=0
+          for status_file in validation-logs/*.status; do
+            if [[ "$(cat "$status_file")" != "0" ]]; then
+              echo "failure: ${status_file}"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+  apple-sdk-contracts:
+    name: Apple SDK syntax contracts
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Prepare contract consumers
+        shell: bash
+        run: |
+          mkdir -p apple-contracts
+          cat > apple-contracts/public-c.c <<'EOF'
+          #include "RPCS3Core.h"
+          #include "RPCS3CoreStatus.h"
+          int main(void)
+          {
+              rpcs3_ios_configuration configuration = {0};
+              rpcs3_ios_core_operation_status operation = rpcs3_ios_core_query_operation_status();
+              rpcs3_ios_installation_status_v2 installation = rpcs3_ios_core_query_installation_status_v2();
+              rpcs3_ios_core_capabilities capabilities = rpcs3_ios_core_query_capabilities();
+              return (int)(configuration.struct_size + operation.active_operation +
+                  installation.terminal_state + capabilities.api_minor);
+          }
+          EOF
+          cat > apple-contracts/public-cxx.cpp <<'EOF'
+          #include "RPCS3Core.h"
+          #include "RPCS3CoreStatus.h"
+          #include <type_traits>
+          static_assert(std::is_standard_layout_v<rpcs3_ios_configuration>);
+          static_assert(std::is_standard_layout_v<rpcs3_ios_installation_status_v2>);
+          int main()
+          {
+              return static_cast<int>(rpcs3_ios_core_midi_topology_generation());
+          }
+          EOF
+          cat > apple-contracts/public-objcxx.mm <<'EOF'
+          #import <UIKit/UIKit.h>
+          #include "RPCS3Core.h"
+          #include "RPCS3CoreStatus.h"
+          static void attach(UIView* view)
+          {
+              (void)rpcs3_ios_core_set_render_view((__bridge void*)view);
+              (void)rpcs3_ios_core_query_capabilities();
+          }
+          int main()
+          {
+              @autoreleasepool { attach([[UIView alloc] init]); }
+              return 0;
+          }
+          EOF
+
+      - name: Lint Apple property lists
+        shell: bash
+        run: |
+          plutil -lint rpcs3/ios/Info.plist.in
+          plutil -lint rpcs3/ios/RPCS3Core-Info.plist.in
+
+      - name: Compile public header consumers
+        shell: bash
+        run: |
+          TARGET=arm64-apple-ios16.0-simulator
+          SDKROOT="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          COMMON=(-target "$TARGET" -isysroot "$SDKROOT" -Irpcs3/ios -fsyntax-only)
+          xcrun --sdk iphonesimulator clang -std=c17 "${COMMON[@]}" apple-contracts/public-c.c
+          xcrun --sdk iphonesimulator clang++ -std=c++20 "${COMMON[@]}" apple-contracts/public-cxx.cpp
+          xcrun --sdk iphonesimulator clang++ -std=c++20 -fobjc-arc -fblocks "${COMMON[@]}" apple-contracts/public-objcxx.mm
+
+      - name: Compile standalone Apple integration sources
+        shell: bash
+        run: |
+          TARGET=arm64-apple-ios16.0-simulator
+          SDKROOT="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          COMMON=(-std=c++23 -Wall -Wextra -Werror -target "$TARGET" -isysroot "$SDKROOT" -fsyntax-only)
+          CORE_INCLUDE=(-I. -Irpcs3 -Irpcs3/ios)
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" \
+            -I3rdparty/ios/rtmidi/include \
+            3rdparty/ios/rtmidi/rtmidi_coremidi_v2.cpp
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/IOSCoreLifecycleDeferred.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/IOSCoreMIDIComposition.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/IOSCoreMIDIIdentity.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/IOSCoreOpenURL.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" \
+            rpcs3/ios/IOSCoreCallbacksComposite.cpp
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" \
+            rpcs3/ios/IOSCoreDefaults.cpp
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" \
+            rpcs3/ios/IOSCoreInstallerTransaction.cpp
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/IOSCoreMIDI.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/IOSCoreSettings.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/IOSCoreCallbacks.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/IOSCoreImageCallbacks.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/platform/IOSControllerFeatures.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/platform/IOSDiagnostics.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/platform/IOSExternalDisplay.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/platform/IOSJIT.mm
+          xcrun --sdk iphonesimulator clang++ "${COMMON[@]}" "${CORE_INCLUDE[@]}" -fobjc-arc -fblocks \
+            rpcs3/ios/platform/IOSPlatform.mm
+
+      - name: Upload Apple syntax logs and consumers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-apple-sdk-contracts
+          path: apple-contracts
+          if-no-files-found: error
+          retention-days: 14

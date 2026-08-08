@@ -2191,7 +2191,7 @@ static void signal_handler(int /*sig*/, siginfo_t* info, void* uct) noexcept
 
 	append_thread_name(msg);
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
 	thread_local bool s_tls_is_attempting_recovery = false;
 	thread_local bool s_tls_last_cause_is_executing = false;
 
@@ -2211,7 +2211,7 @@ static void signal_handler(int /*sig*/, siginfo_t* info, void* uct) noexcept
 		{
 			s_tls_last_cause_is_executing = is_executing;
 			s_tls_is_attempting_recovery = true;
-			pthread_jit_write_protect_np(is_executing ? true : false);
+			jit_write_protect(is_executing);
 
 			sys_log.error("\n%s", msg);
 			sys_log.notice("\n%s", dump_useful_thread_info());

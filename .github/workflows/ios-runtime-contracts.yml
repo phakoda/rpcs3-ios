@@ -1,0 +1,65 @@
+name: iOS runtime contracts
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ios-runtime-contracts.yml'
+      - 'buildfiles/ios/test_retry_generation.cpp'
+      - 'rpcs3/ios/CoreLinkMain.mm'
+      - 'rpcs3/ios/IOSCoreLifecycleDeferred.mm'
+      - 'rpcs3/ios/IOSRetryGeneration.h'
+      - 'rpcs3/ios/RPCS3Core.h'
+      - 'rpcs3/ios/RPCS3CoreStatus.h'
+  push:
+    branches:
+      - 'agent/ios-bootstrap'
+    paths:
+      - '.github/workflows/ios-runtime-contracts.yml'
+      - 'buildfiles/ios/test_retry_generation.cpp'
+      - 'rpcs3/ios/CoreLinkMain.mm'
+      - 'rpcs3/ios/IOSCoreLifecycleDeferred.mm'
+      - 'rpcs3/ios/IOSRetryGeneration.h'
+      - 'rpcs3/ios/RPCS3Core.h'
+      - 'rpcs3/ios/RPCS3CoreStatus.h'
+
+permissions:
+  contents: read
+
+jobs:
+  lifecycle-retry:
+    name: Lifecycle retry concurrency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Build retry-generation contract
+        run: >-
+          c++ -std=c++20 -Wall -Wextra -Werror -pthread -I.
+          buildfiles/ios/test_retry_generation.cpp
+          -o /tmp/rpcs3-ios-retry-generation
+
+      - name: Run retry-generation contract
+        run: /tmp/rpcs3-ios-retry-generation
+
+  uikit-consumer:
+    name: UIKit framework consumer syntax
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Compile the real framework consumer
+        shell: bash
+        run: |
+          SDKROOT="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          xcrun --sdk iphonesimulator clang++ \
+            -std=c++23 \
+            -Wall -Wextra -Werror \
+            -fobjc-arc -fblocks -fsyntax-only \
+            -target arm64-apple-ios16.0-simulator \
+            -isysroot "$SDKROOT" \
+            -Irpcs3/ios \
+            rpcs3/ios/CoreLinkMain.mm

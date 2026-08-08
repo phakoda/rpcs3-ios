@@ -1,0 +1,185 @@
+name: iOS simulator core build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'agent/ios-bootstrap'
+    paths:
+      - '.github/workflows/ios-simulator-core-build.yml'
+      - '.gitmodules'
+      - 'CMakeLists.txt'
+      - 'Utilities/**'
+      - '3rdparty/**'
+      - 'buildfiles/cmake/**'
+      - 'buildfiles/ios/**'
+      - 'rpcs3/CMakeLists.txt'
+      - 'rpcs3/Crypto/**'
+      - 'rpcs3/Emu/**'
+      - 'rpcs3/Input/**'
+      - 'rpcs3/Loader/**'
+      - 'rpcs3/util/**'
+      - 'rpcs3/ios/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-simulator-core-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IOS_DEPLOYMENT_TARGET: '17.4'
+  FFMPEG_VERSION: n8.1.1
+  MOLTENVK_VERSION: v1.4.2
+  MOLTENVK_ARCHIVE: MoltenVK-all.tar
+  MOLTENVK_SHA256: 562a15a29bc358446a56a4091c5f7e08f604184187c1d34f712148b61ef17276
+
+jobs:
+  build:
+    name: Build and verify RPCS3Core
+    runs-on: macos-15
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Record dependency revisions
+        id: revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ffmpeg_core=$(git -C 3rdparty/ffmpeg rev-parse HEAD)" >>"${GITHUB_OUTPUT}"
+          git submodule status --recursive | tee submodules.txt
+          xcodebuild -version | tee xcode-version.txt
+          cmake --version | tee cmake-version.txt
+
+      - name: Restore simulator FFmpeg
+        id: ffmpeg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: out/ffmpeg-simulator
+          key: ffmpeg-ios-simulator-${{ env.IOS_DEPLOYMENT_TARGET }}-${{ env.FFMPEG_VERSION }}-${{ steps.revisions.outputs.ffmpeg_core }}-${{ hashFiles('buildfiles/ios/build_ffmpeg.sh') }}
+
+      - name: Fetch pinned FFmpeg source
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir="${RUNNER_TEMP}/ffmpeg-source"
+          git clone --depth 1 --branch "${FFMPEG_VERSION}" \
+            https://github.com/FFmpeg/FFmpeg.git "${source_dir}"
+          test "$(git -C "${source_dir}" describe --tags --exact-match)" = "${FFMPEG_VERSION}"
+          git -C "${source_dir}" rev-parse HEAD | tee ffmpeg-source-revision.txt
+
+      - name: Build simulator FFmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          FFMPEG_SOURCE: ${{ runner.temp }}/ffmpeg-source
+          OUTPUT_DIR: ${{ github.workspace }}/out/ffmpeg-simulator
+          JOBS: '3'
+        run: bash buildfiles/ios/build_ffmpeg.sh simulator
+
+      - name: Save simulator FFmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: out/ffmpeg-simulator
+          key: ffmpeg-ios-simulator-${{ env.IOS_DEPLOYMENT_TARGET }}-${{ env.FFMPEG_VERSION }}-${{ steps.revisions.outputs.ffmpeg_core }}-${{ hashFiles('buildfiles/ios/build_ffmpeg.sh') }}
+
+      - name: Download pinned MoltenVK
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/${MOLTENVK_ARCHIVE}"
+          curl --fail --location --retry 3 \
+            "https://github.com/KhronosGroup/MoltenVK/releases/download/${MOLTENVK_VERSION}/${MOLTENVK_ARCHIVE}" \
+            --output "${archive}"
+          echo "${MOLTENVK_SHA256}  ${archive}" | shasum -a 256 -c -
+          mkdir -p "${RUNNER_TEMP}/moltenvk"
+          tar -xf "${archive}" -C "${RUNNER_TEMP}/moltenvk"
+          find "${RUNNER_TEMP}/moltenvk" -type f \
+            \( -name libMoltenVK.a -o -name vulkan.h \) -print
+
+      - name: Configure simulator core graph
+        shell: bash
+        env:
+          MOLTENVK_ROOT: ${{ runner.temp }}/moltenvk
+          RPCS3_IOS_FFMPEG_ROOT: ${{ github.workspace }}/out/ffmpeg-simulator
+          BUILD_DIR: ${{ github.workspace }}/build-ios-simulator-core
+          RPCS3_IOS_ENABLE_LLVM: 'OFF'
+        run: |
+          set -euo pipefail
+          mkdir -p out/ios-build-evidence/logs
+          bash buildfiles/ios/configure.sh simulator core 2>&1 | \
+            tee out/ios-build-evidence/logs/configure.log
+
+      - name: Build framework and management app
+        shell: bash
+        run: |
+          set -uo pipefail
+          log=out/ios-build-evidence/logs/build.log
+          set +e
+          cmake --build build-ios-simulator-core \
+            --config Release \
+            --target rpcs3_ios_core \
+            --parallel 3 2>&1 | tee "${log}"
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if (( status != 0 )); then
+            error_pattern='error:|fatal error:|Undefined symbols for architecture|undefined symbol:|ld: |clang: error:|Command .* failed|BUILD FAILED'
+            {
+              echo '### iOS simulator core build diagnostics'
+              echo
+              echo 'First compiler/linker diagnostics promoted from the Xcode build log:'
+              echo '```text'
+              grep -E "${error_pattern}" "${log}" | tail -n 120 || true
+              echo '```'
+              echo
+              echo 'Last 80 build-log lines:'
+              echo '```text'
+              tail -n 80 "${log}" || true
+              echo '```'
+            } >>"${GITHUB_STEP_SUMMARY}"
+
+            while IFS= read -r line; do
+              line=${line//'%'/'%25'}
+              line=${line//$'\r'/'%0D'}
+              printf '::error::%s\n' "${line}"
+            done < <(grep -E "${error_pattern}" "${log}" | tail -n 20 || true)
+
+            exit "${status}"
+          fi
+
+      - name: Locate and verify products
+        shell: bash
+        run: |
+          set -euo pipefail
+          framework="$(find build-ios-simulator-core -type d -name RPCS3Core.framework -print -quit)"
+          app="$(find build-ios-simulator-core -type d -name 'RPCS3 iOS Core.app' -print -quit)"
+          [[ -n "${framework}" ]] || { echo 'error: RPCS3Core.framework was not produced' >&2; exit 1; }
+          [[ -n "${app}" ]] || { echo 'error: RPCS3 iOS Core.app was not produced' >&2; exit 1; }
+          bash buildfiles/ios/capture_build_evidence.sh \
+            out/ios-build-evidence \
+            --simulator-framework "${framework}" \
+            --app "${app}"
+
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-core-evidence-${{ github.sha }}
+          path: |
+            out/ios-build-evidence
+            submodules.txt
+            xcode-version.txt
+            cmake-version.txt
+            ffmpeg-source-revision.txt
+            build-ios-simulator-core/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: warn
+          retention-days: 14

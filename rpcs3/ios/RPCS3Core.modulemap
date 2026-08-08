@@ -1,0 +1,5 @@
+framework module RPCS3Core {
+    header "RPCS3Core.h"
+    header "RPCS3CoreStatus.h"
+    export *
+}

@@ -169,10 +169,19 @@ bool cfg_input::load(const std::string& title_id, const std::string& config_file
 		}
 	}
 
+#ifdef RPCS3_IOS
+    // iOS has no desktop keyboard focus model for the default game window.
+    // Bind Player 1 to Apple's GameController framework and keep the stable
+    // logical device name even when no controller is connected yet.
+    input_log.notice("Input configuration empty. Adding default iOS GameController pad handler");
+    player[0]->handler.from_string(fmt::format("%s", pad_handler::ios_gamecontroller));
+    player[0]->device.from_string("iOS Controller 1"sv);
+#else
 	// Add keyboard by default
 	input_log.notice("Input configuration empty. Adding default keyboard pad handler");
 	player[0]->handler.from_string(fmt::format("%s", pad_handler::keyboard));
 	player[0]->device.from_string(pad::keyboard_device_name.data());
+#endif
 	player[0]->buddy_device.from_string(""sv);
 
 	return false;

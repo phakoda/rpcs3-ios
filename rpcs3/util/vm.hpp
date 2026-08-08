@@ -36,6 +36,11 @@ namespace utils
 		return memory_reserve(size, nullptr, false, can_be_jit);
 	}
 
+	// Returns true when executable mappings use Apple's MAP_JIT write-callback
+	// contract. A debug-authorized jailbroken iOS runtime may fall back to plain
+	// executable mappings when the kernel rejects MAP_JIT with EPERM.
+	bool memory_uses_jit_write_callback() noexcept;
+
 	/**
 	* Commit `size` bytes of virtual memory starting at pointer.
 	* That is, bake reserved memory with physical memory.

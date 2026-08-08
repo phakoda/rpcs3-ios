@@ -1,0 +1,46 @@
+name: iOS CMake composition contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ios-cmake-composition-contract.yml'
+      - 'buildfiles/ios/run_cmake_composition_contract.sh'
+      - 'rpcs3/ios/CoreExtensions.cmake'
+      - 'rpcs3/ios/PatchCoreHost.cmake'
+      - 'rpcs3/ios/**'
+      - '3rdparty/ios/rtmidi/**'
+  push:
+    branches:
+      - 'agent/ios-bootstrap'
+    paths:
+      - '.github/workflows/ios-cmake-composition-contract.yml'
+      - 'buildfiles/ios/run_cmake_composition_contract.sh'
+      - 'rpcs3/ios/CoreExtensions.cmake'
+      - 'rpcs3/ios/PatchCoreHost.cmake'
+      - 'rpcs3/ios/**'
+      - '3rdparty/ios/rtmidi/**'
+
+permissions:
+  contents: read
+
+jobs:
+  composition:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Validate shell syntax
+        shell: bash
+        run: bash -n buildfiles/ios/run_cmake_composition_contract.sh
+      - name: Configure mock iOS composition graph
+        shell: bash
+        run: bash buildfiles/ios/run_cmake_composition_contract.sh
+      - name: Upload composition manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-cmake-composition-manifest
+          path: ${{ runner.temp }}/rpcs3-ios-cmake-composition/build/composition-manifest.txt
+          if-no-files-found: warn
+          retention-days: 14

@@ -16,6 +16,14 @@
 #include <sys/types.h>
 #endif
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+#include <atomic>
+#endif
+
 #if defined(__FreeBSD__)
 #include <sys/sysctl.h>
 #include <vm/vm_param.h>
@@ -48,6 +56,18 @@ static int memfd_create_(const char *name, uint flags)
 
 namespace utils
 {
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+	namespace
+	{
+		std::atomic_bool s_jit_write_callback_required{true};
+	}
+
+	bool memory_uses_jit_write_callback() noexcept
+	{
+		return s_jit_write_callback_required.load(std::memory_order_relaxed);
+	}
+#endif
+
 #ifdef MAP_NORESERVE
 	constexpr int c_map_noreserve = MAP_NORESERVE;
 #else
@@ -261,6 +281,23 @@ namespace utils
 #else
 		auto ptr = ::mmap(use_addr, size, PROT_NONE, MAP_ANON | MAP_PRIVATE | jit_flag | c_map_noreserve, -1, 0);
 #endif
+#if TARGET_OS_IPHONE
+		if (ptr == MAP_FAILED && jit_flag && errno == EPERM)
+		{
+			// Debug-authorized jailbroken runtimes can permit executable mappings
+			// while still rejecting Apple's entitlement-gated MAP_JIT flag.
+			// Retry without MAP_JIT and let JIT writers use direct stores.
+#ifdef ARCH_ARM64
+			ptr = ::mmap(use_addr, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE | c_map_noreserve, -1, 0);
+#else
+			ptr = ::mmap(use_addr, size, PROT_NONE, MAP_ANON | MAP_PRIVATE | c_map_noreserve, -1, 0);
+#endif
+			if (ptr != MAP_FAILED)
+			{
+				s_jit_write_callback_required.store(false, std::memory_order_relaxed);
+			}
+		}
+#endif
 #else
 		auto ptr = ::mmap(use_addr, size, PROT_NONE, MAP_ANON | MAP_PRIVATE | c_map_noreserve, -1, 0);
 #endif
@@ -342,6 +379,21 @@ namespace utils
 			return;
 		}
 
+#if defined(__APPLE__) && TARGET_OS_IPHONE && defined(ARCH_ARM64)
+		if (!memory_uses_jit_write_callback())
+		{
+			// This fallback exists for debug-authorized runtimes that reject
+			// MAP_JIT. Keep the extended-VA reservation intact: remapping or
+			// reprotecting it during JIT teardown can fail with EPERM. Reclaiming
+			// its resident pages is best-effort; memory_commit will set the needed
+			// protection if the reservation is reused.
+			const u64 ptr64 = reinterpret_cast<u64>(pointer);
+			::madvise(reinterpret_cast<void*>(ptr64 & -get_page_size()),
+				size + (ptr64 & (get_page_size() - 1)), c_madv_free);
+			return;
+		}
+#endif
+
 #ifdef _WIN32
 		ensure(::VirtualFree(pointer, size, MEM_DECOMMIT));
 #else
@@ -352,7 +404,7 @@ namespace utils
 		// The Xcode manpage says the pointer is a hint and the OS will try to map at the hint location
 		// so this isn't completely undefined behavior.
 		ensure(::munmap(pointer, size) != -1);
-		ensure(::mmap(pointer, size, PROT_NONE,  MAP_ANON | MAP_PRIVATE | (can_be_jit ? MAP_JIT : 0), -1, 0) == pointer);
+		ensure(::mmap(pointer, size, PROT_NONE, MAP_ANON | MAP_PRIVATE | (can_be_jit ? MAP_JIT : 0), -1, 0) == pointer);
 #else
 		ensure(::mmap(pointer, size, PROT_NONE, MAP_FIXED | MAP_ANON | MAP_PRIVATE | c_map_noreserve, -1, 0) != reinterpret_cast<void*>(uptr{umax}));
 #endif
@@ -381,8 +433,17 @@ namespace utils
 #else
 		const u64 ptr64 = reinterpret_cast<u64>(pointer);
 #if defined(__APPLE__) && defined(ARCH_ARM64)
-		ensure(::munmap(pointer, size) != -1);
-		ensure(::mmap(pointer, size, +prot,  MAP_ANON | MAP_PRIVATE | (can_be_jit ? MAP_JIT : 0), -1, 0) == pointer);
+	#if TARGET_OS_IPHONE
+		if (!memory_uses_jit_write_callback())
+		{
+			ensure(::mprotect(pointer, size, +prot) != -1);
+		}
+		else
+	#endif
+		{
+			ensure(::munmap(pointer, size) != -1);
+			ensure(::mmap(pointer, size, +prot, MAP_ANON | MAP_PRIVATE | (can_be_jit ? MAP_JIT : 0), -1, 0) == pointer);
+		}
 #else
 		ensure(::mmap(pointer, size, +prot, MAP_FIXED | MAP_ANON | MAP_PRIVATE, -1, 0) != reinterpret_cast<void*>(uptr{umax}));
 #endif
@@ -513,6 +574,18 @@ namespace utils
 		ensure(m_file >= 0);
 		ensure(::ftruncate(m_file, m_size) >= 0);
 #else
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+		const std::string path = fs::get_cache_dir() + "rpcs3-shm-" +
+			std::to_string(reinterpret_cast<u64>(this)) + ".tmp";
+		m_file = ::open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR);
+		if (m_file >= 0)
+		{
+			::unlink(path.c_str());
+		}
+
+		ensure(m_file >= 0);
+		ensure(::ftruncate(m_file, m_size) >= 0);
+#else
 		const std::string name = "/rpcs3-mem-" + std::to_string(reinterpret_cast<u64>(this));
 
 		while ((m_file = ::shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IWUSR | S_IRUSR)) == -1)
@@ -528,9 +601,10 @@ namespace utils
 		ensure(::shm_unlink(name.c_str()) >= 0);
 		ensure(::ftruncate(m_file, m_size) >= 0);
 #endif
+#endif
 	}
 
-	shm::shm(u64 size, const std::string& storage)
+	shm::shm(u64 size, [[maybe_unused]] const std::string& storage)
 		: m_size(utils::align(size, 0x10000))
 	{
 #ifdef _WIN32
@@ -701,6 +775,24 @@ namespace utils
 		}
 #else
 
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+		// The storage argument is a cache-file name on Windows, but callers also
+		// pass relative labels such as "_block_x00000000". Opening those labels
+		// directly is denied by the iOS app sandbox. Back the mapping with an
+		// immediately unlinked file in the app's writable cache directory instead.
+		const std::string path = fs::get_cache_dir() + "rpcs3-shm-" +
+			std::to_string(reinterpret_cast<u64>(this)) + ".tmp";
+		m_file = ::open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR);
+		if (m_file >= 0)
+		{
+			::unlink(path.c_str());
+		}
+
+		ensure(m_file >= 0);
+		ensure(::ftruncate(m_file, m_size) >= 0);
+		return;
+#else
+
 #ifdef __linux__
 #ifdef ANDROID
 		if constexpr (constexpr char c = '?')
@@ -793,13 +885,14 @@ namespace utils
 		}
 #endif
 
-		if (stats.st_size ^ m_size)
-		{
-			// Fix file size
-			ensure(::ftruncate(m_file, m_size) >= 0);
-		}
+			if (stats.st_size ^ m_size)
+			{
+				// Fix file size
+				ensure(::ftruncate(m_file, m_size) >= 0);
+			}
 #endif
-	}
+#endif
+		}
 
 	shm::~shm()
 	{

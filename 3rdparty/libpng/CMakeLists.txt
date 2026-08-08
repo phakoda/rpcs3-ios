@@ -8,6 +8,10 @@ if (NOT USE_SYSTEM_LIBPNG)
 	add_subdirectory(libpng EXCLUDE_FROM_ALL)
 	target_include_directories(png_static SYSTEM INTERFACE "${libpng_BINARY_DIR}" "${libpng_SOURCE_DIR}")
 
+	# Keep the selected target visible when this wrapper is added from a helper
+	# function, as the iOS aggregate does. PARENT_SCOPE alone only reaches the
+	# helper's temporary function scope and is discarded when it returns.
+	set(LIBPNG_TARGET png_static CACHE INTERNAL "Selected RPCS3 libpng target" FORCE)
 	set(LIBPNG_TARGET png_static PARENT_SCOPE)
 else()
 	find_package(PNG REQUIRED)
@@ -17,5 +21,6 @@ else()
 	target_link_libraries(3rdparty_system_libpng INTERFACE ${PNG_LIBRARY})
 	target_compile_definitions(3rdparty_system_libpng INTERFACE ${PNG_DEFINITIONS})
 
+	set(LIBPNG_TARGET 3rdparty_system_libpng CACHE INTERNAL "Selected RPCS3 libpng target" FORCE)
 	set(LIBPNG_TARGET 3rdparty_system_libpng PARENT_SCOPE)
 endif()

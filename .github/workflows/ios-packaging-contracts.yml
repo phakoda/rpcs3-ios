@@ -1,0 +1,52 @@
+name: iOS packaging contracts
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ios-packaging-contracts.yml'
+      - 'buildfiles/ios/package_core_release.sh'
+      - 'IOS_CORE_PACKAGING.md'
+      - 'IOS_CORE_0_5.md'
+      - 'IOS_FRAMEWORK_CONSUMER.md'
+      - 'IOS_ARTIFACT_VERIFICATION.md'
+      - 'IOS_BUILD_EVIDENCE.md'
+  push:
+    branches:
+      - 'agent/ios-bootstrap'
+    paths:
+      - '.github/workflows/ios-packaging-contracts.yml'
+      - 'buildfiles/ios/package_core_release.sh'
+      - 'IOS_CORE_PACKAGING.md'
+      - 'IOS_CORE_0_5.md'
+      - 'IOS_FRAMEWORK_CONSUMER.md'
+      - 'IOS_ARTIFACT_VERIFICATION.md'
+      - 'IOS_BUILD_EVIDENCE.md'
+
+permissions:
+  contents: read
+
+jobs:
+  packaging-source-contracts:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Validate shell syntax and package inputs
+        shell: bash
+        run: |
+          bash -n buildfiles/ios/package_core_release.sh
+          grep -Fq 'verify_core_xcframework.sh' buildfiles/ios/package_core_release.sh
+          grep -Fq 'write_build_manifest.sh' buildfiles/ios/package_core_release.sh
+          grep -Fq 'SHA256SUMS' buildfiles/ios/package_core_release.sh
+          test -f rpcs3/ios/RPCS3Core.h
+          test -f rpcs3/ios/RPCS3CoreStatus.h
+          test -f rpcs3/ios/RPCS3Core.modulemap
+          test -f IOS_CORE_0_5.md
+      - name: Confirm missing XCFramework is rejected
+        shell: bash
+        run: |
+          if buildfiles/ios/package_core_release.sh /does/not/exist "${RUNNER_TEMP}/release"; then
+            echo 'error: missing XCFramework unexpectedly packaged' >&2
+            exit 1
+          fi

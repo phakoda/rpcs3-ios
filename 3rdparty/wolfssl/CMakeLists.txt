@@ -21,5 +21,13 @@ else()
 
 	add_subdirectory(wolfssl EXCLUDE_FROM_ALL)
 
-	target_compile_definitions(wolfssl PUBLIC WOLFSSL_DES_ECB HAVE_WRITE_DUP FP_MAX_BITS=8192 WOLFSSL_USE_OPTIONS_H)
+	# Feature definitions describe the ABI and must be visible while building
+	# wolfSSL and while compiling RPCS3 code against its headers.  options.h is
+	# different: wolfSSL configures its own objects through its CMake-generated
+	# build flags and explicitly reserves WOLFSSL_USE_OPTIONS_H for consumers.
+	# Making it PUBLIC causes recent wolfSSL to diagnose options.h being included
+	# in a library object (and RPCS3's -Werror correctly turns that into a hard
+	# failure), so expose that one definition only to dependants.
+	target_compile_definitions(wolfssl PUBLIC WOLFSSL_DES_ECB HAVE_WRITE_DUP FP_MAX_BITS=8192)
+	target_compile_definitions(wolfssl INTERFACE WOLFSSL_USE_OPTIONS_H)
 endif()
