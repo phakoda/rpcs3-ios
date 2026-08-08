@@ -5,10 +5,11 @@ on:
     branches:
       - agent/ios-vphone-runtime
     paths:
+      - 'CMakePresets.json'
       - 'rpcs3/rpcs3_ios.entitlements'
       - 'Utilities/JIT.h'
       - 'Utilities/JITASM.cpp'
-      - 'rpcs3/util/vm_native.cpp'
+      - 'rpcs3/util/vm_native*.cpp'
       - 'buildfiles/ios/**'
       - '.github/workflows/ios-jit-smoke.yml'
   workflow_dispatch:
@@ -36,3 +37,42 @@ jobs:
         run: |
           set -euo pipefail
           zsh buildfiles/ios/probe_jit_callback.sh --output "$RUNNER_TEMP/rpcs3-ios-jit-probe"
+
+      - name: Validate deferred iOS VM override wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_root="$RUNNER_TEMP/rpcs3-ios-cmake-hook"
+          mkdir -p "$test_root/rpcs3/Emu" "$test_root/rpcs3/util" "$test_root/buildfiles/ios"
+          cp buildfiles/ios/runtime_overrides.cmake "$test_root/buildfiles/ios/runtime_overrides.cmake"
+
+          cat > "$test_root/CMakeLists.txt" <<'EOF'
+          cmake_minimum_required(VERSION 3.28)
+          project(hooktest LANGUAGES CXX)
+          set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+          set(RPCS3_IOS ON)
+          add_subdirectory(rpcs3/Emu)
+          EOF
+
+          cat > "$test_root/rpcs3/Emu/CMakeLists.txt" <<'EOF'
+          add_library(rpcs3_emu STATIC ../util/vm_native.cpp)
+          EOF
+
+          printf '%s\n' 'void memory_decommit() {}' > "$test_root/rpcs3/util/vm_native.cpp"
+          printf '%s\n' 'void memory_decommit_ios() {}' > "$test_root/rpcs3/util/vm_native_ios.cpp"
+
+          cmake -S "$test_root" -B "$test_root/build" -G Ninja \
+            -DCMAKE_PROJECT_hooktest_INCLUDE="$test_root/buildfiles/ios/runtime_overrides.cmake"
+          cmake --build "$test_root/build"
+
+          python3 - "$test_root/build/compile_commands.json" <<'PY'
+          import json
+          import sys
+
+          commands = json.load(open(sys.argv[1], encoding='utf-8'))
+          native = next(item for item in commands if item['file'].endswith('/vm_native.cpp'))
+          ios = next(item for item in commands if item['file'].endswith('/vm_native_ios.cpp'))
+          define = '-Dmemory_decommit=memory_decommit_platform'
+          assert define in native['command'], native['command']
+          assert define not in ios['command'], ios['command']
+          PY
