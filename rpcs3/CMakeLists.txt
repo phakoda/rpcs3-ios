@@ -153,7 +153,9 @@ if (NOT ANDROID)
             XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${RPCS3_IOS_BUNDLE_IDENTIFIER}"
             XCODE_ATTRIBUTE_SUPPORTED_PLATFORMS "iphoneos iphonesimulator"
             XCODE_ATTRIBUTE_SUPPORTS_MACCATALYST "NO"
-            XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2")
+            XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@executable_path/Frameworks")
         if(RPCS3_IOS_DEVELOPMENT_TEAM)
             set_target_properties(rpcs3 PROPERTIES
                 XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${RPCS3_IOS_DEVELOPMENT_TEAM}")
@@ -207,6 +209,8 @@ if (NOT ANDROID)
                     $<TARGET_BUNDLE_DIR:rpcs3>/Frameworks
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "${Vulkan_LIBRARY}"
+                    $<TARGET_BUNDLE_DIR:rpcs3>/Frameworks/libMoltenVK.dylib
+                COMMAND /usr/bin/codesign --force --sign -
                     $<TARGET_BUNDLE_DIR:rpcs3>/Frameworks/libMoltenVK.dylib
                 VERBATIM)
         endif()
