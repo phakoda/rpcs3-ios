@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "util/vm.hpp"
 #include "util/asm.hpp"
+#include "util/logs.hpp"
 #ifdef _WIN32
 #include "Utilities/File.h"
 #include "util/dyn_lib.hpp"
@@ -23,6 +24,16 @@
 #if defined(__APPLE__) && TARGET_OS_IPHONE
 #include <atomic>
 #endif
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE && defined(RPCS3_IOS_STIKDEBUG)
+#include <algorithm>
+#include <mutex>
+#include <unordered_set>
+#include <vector>
+extern "C" void* rpcs3_ios_stikdebug_prepare_jit_region(void* address, size_t size);
+#endif
+
+LOG_CHANNEL(vm_native_log, "VM");
 
 #if defined(__FreeBSD__)
 #include <sys/sysctl.h>
@@ -60,11 +71,131 @@ namespace utils
 	namespace
 	{
 		std::atomic_bool s_jit_write_callback_required{true};
+		std::atomic_bool s_logged_jit_fallback{false};
+
+#if defined(RPCS3_IOS_STIKDEBUG)
+		std::mutex s_stikdebug_jit_pages_mutex;
+		std::unordered_set<uptr> s_stikdebug_jit_pages;
+		std::unordered_set<uptr> s_stikdebug_deferred_rx_pages;
+		std::atomic_bool s_stikdebug_jit_active{false};
+		std::atomic_bool s_logged_stikdebug_prepare{false};
+
+		void prepare_stikdebug_jit_pages(void* pointer, usz size)
+		{
+			const uptr page_size = static_cast<uptr>(get_page_size());
+			const uptr first_page = reinterpret_cast<uptr>(pointer) & -page_size;
+			const uptr last_page = utils::align(
+				reinterpret_cast<uptr>(pointer) + size, page_size);
+
+			std::lock_guard lock(s_stikdebug_jit_pages_mutex);
+			for (uptr page = first_page; page < last_page;)
+			{
+				if (s_stikdebug_jit_pages.contains(page))
+				{
+					page += page_size;
+					continue;
+				}
+
+				const uptr run_start = page;
+				do
+				{
+					page += page_size;
+				}
+				while (page < last_page && !s_stikdebug_jit_pages.contains(page));
+
+				const usz run_size = page - run_start;
+				std::vector<u8> first_bytes;
+				first_bytes.reserve(run_size / page_size);
+				for (uptr saved = run_start; saved < page; saved += page_size)
+				{
+					first_bytes.push_back(*reinterpret_cast<const u8*>(saved));
+				}
+				ensure(rpcs3_ios_stikdebug_prepare_jit_region(
+					reinterpret_cast<void*>(run_start), run_size) == reinterpret_cast<void*>(run_start));
+
+				usz byte_index = 0;
+				for (uptr prepared = run_start; prepared < page; prepared += page_size)
+				{
+					*reinterpret_cast<u8*>(prepared) = first_bytes[byte_index++];
+					s_stikdebug_jit_pages.emplace(prepared);
+				}
+
+				if (!s_logged_stikdebug_prepare.exchange(true, std::memory_order_relaxed))
+				{
+					vm_native_log.notice("StikDebug prepared JIT pages at first executable commit: base=%p, size=0x%x",
+						reinterpret_cast<void*>(run_start), run_size);
+				}
+			}
+		}
+#endif
 	}
 
 	bool memory_uses_jit_write_callback() noexcept
 	{
 		return s_jit_write_callback_required.load(std::memory_order_relaxed);
+	}
+
+	void memory_forget_stikdebug_jit_pages(void* pointer, usz size) noexcept
+	{
+#if defined(RPCS3_IOS_STIKDEBUG)
+		if (!pointer || !size)
+		{
+			return;
+		}
+
+		const uptr page_size = static_cast<uptr>(get_page_size());
+		const uptr first_page = reinterpret_cast<uptr>(pointer) & -page_size;
+		const uptr last_page = utils::align(
+			reinterpret_cast<uptr>(pointer) + size, page_size);
+		std::lock_guard lock(s_stikdebug_jit_pages_mutex);
+		for (uptr page = first_page; page < last_page; page += page_size)
+		{
+			s_stikdebug_jit_pages.erase(page);
+			s_stikdebug_deferred_rx_pages.erase(page);
+		}
+#else
+		static_cast<void>(pointer);
+		static_cast<void>(size);
+#endif
+	}
+
+	void memory_activate_stikdebug_jit()
+	{
+#if defined(RPCS3_IOS_STIKDEBUG)
+		if (s_stikdebug_jit_active.exchange(true, std::memory_order_acq_rel))
+		{
+			return;
+		}
+
+		std::vector<uptr> deferred_pages;
+		{
+			std::lock_guard lock(s_stikdebug_jit_pages_mutex);
+			deferred_pages.assign(s_stikdebug_deferred_rx_pages.begin(),
+				s_stikdebug_deferred_rx_pages.end());
+			s_stikdebug_deferred_rx_pages.clear();
+		}
+
+		std::ranges::sort(deferred_pages);
+		const uptr page_size = static_cast<uptr>(get_page_size());
+		for (usz index = 0; index < deferred_pages.size();)
+		{
+			const uptr run_start = deferred_pages[index++];
+			uptr run_end = run_start + page_size;
+			while (index < deferred_pages.size() && deferred_pages[index] == run_end)
+			{
+				run_end += page_size;
+				index++;
+			}
+
+			const usz run_size = run_end - run_start;
+			prepare_stikdebug_jit_pages(reinterpret_cast<void*>(run_start), run_size);
+			ensure(::mprotect(reinterpret_cast<void*>(run_start), run_size,
+				PROT_READ | PROT_EXEC) == 0);
+		}
+
+		vm_native_log.notice("StikDebug JIT activation completed with %u deferred executable pages",
+			deferred_pages.size());
+#endif
 	}
 #endif
 
@@ -277,7 +408,13 @@ namespace utils
 #ifdef __APPLE__
 		const int jit_flag = is_memory_mapping || !can_be_jit ? 0 : MAP_JIT;
 #ifdef ARCH_ARM64
-		auto ptr = ::mmap(use_addr, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE | jit_flag | c_map_noreserve, -1, 0);
+		// Guest-memory and mirror reservations are address-space placeholders, not
+		// committed storage. Mapping the tens of gigabytes used by the PS3 address
+		// layout RW makes iOS account them against the process before main() and can
+		// exhaust a sideloaded app's virtual-memory allowance. Only JIT arenas need
+		// to start writable; regular reservations are committed on demand.
+		const int initial_protection = can_be_jit ? PROT_READ | PROT_WRITE : PROT_NONE;
+		auto ptr = ::mmap(use_addr, size, initial_protection, MAP_ANON | MAP_PRIVATE | jit_flag | c_map_noreserve, -1, 0);
 #else
 		auto ptr = ::mmap(use_addr, size, PROT_NONE, MAP_ANON | MAP_PRIVATE | jit_flag | c_map_noreserve, -1, 0);
 #endif
@@ -286,15 +423,46 @@ namespace utils
 		{
 			// Debug-authorized jailbroken runtimes can permit executable mappings
 			// while still rejecting Apple's entitlement-gated MAP_JIT flag.
-			// Retry without MAP_JIT and let JIT writers use direct stores.
+			// Retry without MAP_JIT as a sparse, non-executable RW reservation.
+			// JIT managers finalize populated pages RX after writing; mapping the
+			// complete multi-gigabyte reservation executable up front exhausts
+			// vPhone's executable-VM allowance.
 #ifdef ARCH_ARM64
-			ptr = ::mmap(use_addr, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE | c_map_noreserve, -1, 0);
+			ptr = ::mmap(use_addr, size, PROT_READ | PROT_WRITE,
+				MAP_ANON | MAP_PRIVATE | c_map_noreserve, -1, 0);
 #else
-			ptr = ::mmap(use_addr, size, PROT_NONE, MAP_ANON | MAP_PRIVATE | c_map_noreserve, -1, 0);
+			ptr = ::mmap(use_addr, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE | c_map_noreserve, -1, 0);
 #endif
 			if (ptr != MAP_FAILED)
 			{
+				// vPhone strips current execute permission from this mapping but
+				// retains it in max_protection, which is exactly what the strict W^X
+				// writers need. Authorize only the leading code window; the extra
+				// alignment slop keeps a full 8 MiB after the 64 KiB trim below.
+				constexpr usz executable_window = 8 * 1024 * 1024 + 0x10000;
+				const usz executable_size = std::min<usz>(size, executable_window);
+#if !defined(RPCS3_IOS_STIKDEBUG)
+				if (ptr != MAP_FAILED && ::mmap(ptr, executable_size, PROT_READ | PROT_WRITE | PROT_EXEC,
+					MAP_FIXED | MAP_ANON | MAP_PRIVATE | c_map_noreserve, -1, 0) == MAP_FAILED)
+				{
+					::munmap(ptr, size);
+					ptr = MAP_FAILED;
+				}
+#else
+				// A StikDebug breakpoint cannot be handled during dyld's global
+				// initializers. Leave the fallback reservation writable here and
+				// prepare newly committed pages immediately before their first write.
+				static_cast<void>(executable_size);
+#endif
+			}
+			if (ptr != MAP_FAILED)
+			{
 				s_jit_write_callback_required.store(false, std::memory_order_relaxed);
+
+				if (!s_logged_jit_fallback.exchange(true, std::memory_order_relaxed))
+				{
+					vm_native_log.notice("MAP_JIT was rejected with EPERM; using sparse RW arenas with bounded W^X code windows");
+				}
 			}
 		}
 #endif
@@ -359,15 +527,47 @@ namespace utils
 		ensure(::VirtualAlloc(pointer, size, MEM_COMMIT, +prot));
 #else
 		const u64 ptr64 = reinterpret_cast<u64>(pointer);
-		ensure(::mprotect(reinterpret_cast<void*>(ptr64 & -get_page_size()), size + (ptr64 & (get_page_size() - 1)), +prot) != -1);
+		const void* const page_base = reinterpret_cast<void*>(ptr64 & -get_page_size());
+		const usz page_span = size + (ptr64 & (get_page_size() - 1));
 
-		if constexpr (c_madv_dump != 0)
+#if defined(__APPLE__) && TARGET_OS_IPHONE && defined(ARCH_ARM64)
+		// MAP_JIT is unavailable on vPhone, and creating a fresh executable mmap
+		// for every sparse commit eventually exhausts TXM's mapping allowance.
+		// Commit JIT storage writable here; the JIT managers populate it and then
+		// perform the accepted RW -> RX transition before executing any code.
+		if (!memory_uses_jit_write_callback() &&
+			(prot == protection::wx || prot == protection::rx))
 		{
-			ensure(::madvise(reinterpret_cast<void*>(ptr64 & -get_page_size()), size + (ptr64 & (get_page_size() - 1)), c_madv_dump) != -1);
+		#if defined(RPCS3_IOS_STIKDEBUG)
+			// This is the first point at which a JIT page becomes backed for
+			// writing. It occurs during emulator boot, after StikDebug has attached,
+			// and before the compiler can place code on the page.
+			ensure(::mprotect(const_cast<void*>(page_base), page_span,
+				PROT_READ | PROT_WRITE) == 0);
+			if (s_stikdebug_jit_active.load(std::memory_order_acquire))
+			{
+				prepare_stikdebug_jit_pages(const_cast<void*>(page_base), page_span);
+			}
+		#endif
+			// The fallback reservation is sparse RW already. Individual managers
+			// change populated pages to RX only after writing and flushing them.
+			return;
 		}
 		else
 		{
-			ensure(::madvise(reinterpret_cast<void*>(ptr64 & -get_page_size()), size + (ptr64 & (get_page_size() - 1)), MADV_WILLNEED) != -1);
+			ensure(::mprotect(const_cast<void*>(page_base), page_span, +prot) != -1);
+		}
+#else
+		ensure(::mprotect(const_cast<void*>(page_base), page_span, +prot) != -1);
+#endif
+
+		if constexpr (c_madv_dump != 0)
+		{
+			ensure(::madvise(const_cast<void*>(page_base), page_span, c_madv_dump) != -1);
+		}
+		else
+		{
+			ensure(::madvise(const_cast<void*>(page_base), page_span, MADV_WILLNEED) != -1);
 		}
 #endif
 	}
@@ -383,10 +583,17 @@ namespace utils
 		if (!memory_uses_jit_write_callback())
 		{
 			// This fallback exists for debug-authorized runtimes that reject
-			// MAP_JIT. Keep the extended-VA reservation intact: remapping or
-			// reprotecting it during JIT teardown can fail with EPERM. Reclaiming
-			// its resident pages is best-effort; memory_commit will set the needed
-			// protection if the reservation is reused.
+			// MAP_JIT. Reset the bounded executable window to fresh writable pages
+			// so a subsequent emulator boot can reuse addresses that were RX. The
+			// remainder of the extended-VA reservation stays sparse and intact.
+			if (can_be_jit)
+			{
+				constexpr usz executable_window = 8 * 1024 * 1024;
+				const usz executable_size = std::min(size, executable_window);
+				ensure(::mmap(pointer, executable_size, PROT_READ | PROT_WRITE | PROT_EXEC,
+					MAP_FIXED | MAP_ANON | MAP_PRIVATE | c_map_noreserve, -1, 0) != MAP_FAILED);
+				ensure(::mprotect(pointer, executable_size, PROT_READ | PROT_WRITE) == 0);
+			}
 			const u64 ptr64 = reinterpret_cast<u64>(pointer);
 			::madvise(reinterpret_cast<void*>(ptr64 & -get_page_size()),
 				size + (ptr64 & (get_page_size() - 1)), c_madv_free);
@@ -436,7 +643,8 @@ namespace utils
 	#if TARGET_OS_IPHONE
 		if (!memory_uses_jit_write_callback())
 		{
-			ensure(::mprotect(pointer, size, +prot) != -1);
+			ensure(::mmap(pointer, size, +prot,
+				MAP_FIXED | MAP_ANON | MAP_PRIVATE | c_map_noreserve, -1, 0) != MAP_FAILED);
 		}
 		else
 	#endif
@@ -478,6 +686,9 @@ namespace utils
 		unmap_mappping_memory(reinterpret_cast<u64>(pointer), size);
 		ensure(::VirtualFree(pointer, 0, MEM_RELEASE));
 #else
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+		memory_forget_stikdebug_jit_pages(pointer, size);
+#endif
 		ensure(::munmap(pointer, size) != -1);
 #endif
 	}
@@ -512,7 +723,51 @@ namespace utils
 		}
 #else
 		const u64 ptr64 = reinterpret_cast<u64>(pointer);
-		ensure(::mprotect(reinterpret_cast<void*>(ptr64 & -get_page_size()), size + (ptr64 & (get_page_size() - 1)), +prot) != -1);
+		void* const page_base = reinterpret_cast<void*>(ptr64 & -get_page_size());
+		const usz page_span = size + (ptr64 & (get_page_size() - 1));
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE && defined(RPCS3_IOS_STIKDEBUG)
+		if (!memory_uses_jit_write_callback() && prot == protection::rx)
+		{
+			if (!s_stikdebug_jit_active.load(std::memory_order_acquire))
+			{
+				const uptr page_size = static_cast<uptr>(get_page_size());
+				const uptr first_page = reinterpret_cast<uptr>(page_base);
+				const uptr last_page = utils::align(first_page + page_span, page_size);
+				std::lock_guard lock(s_stikdebug_jit_pages_mutex);
+				for (uptr page = first_page; page < last_page; page += page_size)
+				{
+					s_stikdebug_deferred_rx_pages.emplace(page);
+				}
+				return;
+			}
+
+			prepare_stikdebug_jit_pages(page_base, page_span);
+		}
+#endif
+		if (::mprotect(page_base, page_span, +prot) == 0)
+		{
+			return;
+		}
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+		// A recycled sparse JIT arena can contain adjacent VM entries with
+		// different current protections. Darwin may reject one mprotect spanning
+		// those entries even though each page permits the requested transition.
+		const usz page_size = get_page_size();
+		for (usz offset = 0; offset < page_span; offset += page_size)
+		{
+			if (::mprotect(static_cast<u8*>(page_base) + offset,
+				std::min(page_size, page_span - offset), +prot) != 0)
+			{
+				vm_native_log.error("JIT page protection failed: base=%p, offset=0x%x, size=0x%x, prot=%d, errno=%d",
+					page_base, offset, page_span, static_cast<int>(prot), errno);
+				ensure(false);
+			}
+		}
+#else
+		ensure(false);
+#endif
 #endif
 	}
 

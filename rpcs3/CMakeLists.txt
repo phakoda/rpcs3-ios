@@ -162,6 +162,14 @@ if (NOT ANDROID)
         target_link_libraries(rpcs3 PRIVATE
             "-framework Foundation"
             "-framework UIKit")
+
+        # Caller-provided iOS MoltenVK builds are commonly distributed as a
+        # dylib (including MeloNX's runtime). Keep the loader path inside the
+        # signed application and embed that runtime below after linking.
+        if(USE_VULKAN AND Vulkan_LIBRARY MATCHES "\\.dylib$")
+            target_link_options(rpcs3 PRIVATE
+                "LINKER:-rpath,@executable_path/Frameworks")
+        endif()
     elseif(APPLE)
         target_sources(rpcs3 PRIVATE rpcs3.icns update_helper.sh)
         set_source_files_properties(update_helper.sh PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
@@ -193,6 +201,15 @@ if (NOT ANDROID)
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 ${CMAKE_SOURCE_DIR}/bin/GuiConfigs $<TARGET_BUNDLE_DIR:rpcs3>/GuiConfigs
             VERBATIM)
+        if(USE_VULKAN AND Vulkan_LIBRARY MATCHES "\\.dylib$")
+            add_custom_command(TARGET rpcs3 POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                    $<TARGET_BUNDLE_DIR:rpcs3>/Frameworks
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${Vulkan_LIBRARY}"
+                    $<TARGET_BUNDLE_DIR:rpcs3>/Frameworks/libMoltenVK.dylib
+                VERBATIM)
+        endif()
     elseif(APPLE)
         qt_finalize_target(rpcs3)
         add_custom_command(TARGET rpcs3 POST_BUILD

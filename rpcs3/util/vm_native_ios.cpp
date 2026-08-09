@@ -38,14 +38,33 @@ namespace utils
 		}
 
 		// MAP_JIT cannot be safely recreated at a requested address with
-		// MAP_FIXED. The old macOS path unmaps first and then only supplies the
-		// address as a hint, which can move the 2 GiB RPCS3 JIT arena. Keep the
-		// reservation mapped on iOS and make resident-page reclamation best effort.
+		// MAP_FIXED. The debug-authorized vPhone fallback does not use MAP_JIT,
+		// however, so it can replace committed pages with sparse PROT_NONE
+		// placeholders while preserving the full JIT reservation address.
 		const auto page_size = static_cast<uptr>(get_page_size());
 		const uptr address = reinterpret_cast<uptr>(pointer);
 		void* const page_base = reinterpret_cast<void*>(address & -page_size);
 		const usz page_span = size + (address & (page_size - 1));
 		const bool callback_path = memory_uses_jit_write_callback();
+
+		if (!callback_path)
+		{
+			memory_forget_stikdebug_jit_pages(page_base, page_span);
+			if (::mmap(page_base, page_span, PROT_NONE,
+				MAP_FIXED | MAP_ANON | MAP_PRIVATE, -1, 0) == MAP_FAILED)
+			{
+				const int error = errno;
+				vm_ios_log.error("Failed to restore sparse JIT placeholder %p+0x%x (errno=%d)",
+					page_base, page_span, error);
+			}
+			else if (!s_logged_jit_decommit_path.exchange(true, std::memory_order_relaxed))
+			{
+				vm_ios_log.notice("Restoring sparse iOS JIT placeholders during decommit (base=%p, size=0x%x)",
+					page_base, page_span);
+			}
+
+			return;
+		}
 
 		if (!s_logged_jit_decommit_path.exchange(true, std::memory_order_relaxed))
 		{

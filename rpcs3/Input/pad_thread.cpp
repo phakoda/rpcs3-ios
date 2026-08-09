@@ -22,6 +22,12 @@
 #include "Emu/Io/interception.h"
 #include "Emu/Io/PadHandler.h"
 #include "Emu/Io/pad_config.h"
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE
+#include "ios_pad_handler.h"
+#endif
+#endif
 #include "Emu/System.h"
 #include "Emu/system_config.h"
 #include "Emu/RSX/Overlays/HomeMenu/overlay_home_menu.h"
@@ -33,6 +39,22 @@
 #include "util/atomic.hpp"
 
 LOG_CHANNEL(sys_log, "SYS");
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+namespace
+{
+	void apply_ios_default_pad()
+	{
+		cfg_player* const player = g_cfg_input.player[0];
+		if (player->handler == pad_handler::null || player->handler == pad_handler::keyboard)
+		{
+			player->handler.set(pad_handler::ios);
+			player->device.from_string(ios_pad_handler::device_name(0));
+			player->buddy_device.from_string(""sv);
+		}
+	}
+}
+#endif
 
 extern void pad_state_notify_state_change(usz index, u32 state);
 extern bool is_input_allowed();
@@ -139,6 +161,10 @@ void pad_thread::Init()
 		input_log.notice("Loaded empty pad config");
 	}
 
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+	apply_ios_default_pad();
+#endif
+
 	// Adjust to the different pad handlers
 	for (usz i = 0; i < g_cfg_input.player.size(); i++)
 	{
@@ -151,6 +177,10 @@ void pad_thread::Init()
 	{
 		input_log.notice("Reloaded empty pad config");
 	}
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+	apply_ios_default_pad();
+#endif
 
 	input_log.trace("Using pad config:\n%s", g_cfg_input);
 
@@ -885,6 +915,10 @@ std::shared_ptr<PadHandlerBase> pad_thread::GetHandler(pad_handler type)
 #ifdef HAVE_LIBEVDEV
 	case pad_handler::evdev:
 		return std::make_shared<evdev_joystick_handler>();
+#endif
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+	case pad_handler::ios:
+		return std::make_shared<ios_pad_handler>();
 #endif
 	}
 

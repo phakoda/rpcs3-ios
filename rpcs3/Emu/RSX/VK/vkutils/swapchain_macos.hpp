@@ -17,6 +17,10 @@ namespace vk
 		createInfo.sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT;
 		createInfo.pLayer = GetCAMetalLayerFromMetalView(window_handle);
 
+#if TARGET_OS_IPHONE
+		rsx_log.notice("iOS Vulkan surface: native view '%s', Metal layer '%s'", GetMetalViewClassName(window_handle), GetMetalLayerClassName(const_cast<void*>(createInfo.pLayer)));
+#endif
+
 		CHECK_RESULT(vkCreateMetalSurfaceEXT(vk_instance, &createInfo, NULL, &result));
 		return result;
 	}

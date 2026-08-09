@@ -70,6 +70,7 @@
 
 #ifdef __APPLE__
 #include <libkern/OSCacheControl.h>
+#include <TargetConditionals.h>
 #endif
 
 extern atomic_t<u64> g_watchdog_hold_ctr;
@@ -3993,7 +3994,17 @@ extern void ppu_precompile(std::vector<std::string>& dir_queue, std::vector<ppu_
 		}
 	}
 
-	named_thread_group workers("SPRX Worker ", std::min<u32>(software_thread_limit, cpu_thread_limit), [&]
+	u32 loader_thread_count = std::min<u32>(software_thread_limit, cpu_thread_limit);
+
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	// ppu_precompile invokes ppu_initialize from each SPRX loader thread. Even
+	// when each individual module uses one compiler, parallel loaders therefore
+	// still create several LLVM engines and their large JIT reservations.
+	loader_thread_count = std::min<u32>(loader_thread_count, 1);
+	ppu_log.notice("iOS: limiting PPU/PRX LLVM compilation to one loader worker");
+#endif
+
+	named_thread_group workers("SPRX Worker ", loader_thread_count, [&]
 	{
 		jit_write_guard jit_guard;
 
@@ -5252,7 +5263,18 @@ bool ppu_initialize(const ppu_module<lv2_obj>& info, bool check_only, u64 file_s
 
 		*progress_dialog = get_localized_string(localized_string_id::PROGRESS_DIALOG_COMPILING_PPU_MODULES);
 
-		const u32 thread_count = std::max<u32>(std::min<u32>(::size32(workload), rpcs3::utils::get_max_threads()), 1) - 1;
+		u32 compiler_count = std::max<u32>(std::min<u32>(::size32(workload), rpcs3::utils::get_max_threads()), 1);
+
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+		// Every PPU LLVM compiler owns a large executable-memory reservation.
+		// Launching one compiler per reported vPhone CPU concurrently exhausts
+		// the guest process VM allowance and surfaces as std::bad_alloc. Keep a
+		// single compiler on iOS; compilation is slower but the reservation is
+		// reused safely for the complete workload.
+		compiler_count = 1;
+#endif
+
+		const u32 thread_count = compiler_count - 1;
 
 		struct thread_index_allocator
 		{

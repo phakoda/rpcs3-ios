@@ -46,6 +46,7 @@
 #include "util/logs.hpp"
 #include "util/init_mutex.hpp"
 #include "util/sysinfo.hpp"
+#include "util/vm.hpp"
 
 #include <memory>
 #include <regex>
@@ -283,6 +284,13 @@ void init_fxo_for_exec(utils::serial* ar, bool full = false)
 // Some settings are not allowed with certain conditions
 static void fixup_settings(const psf::registry* _psf)
 {
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	// StikDebug cannot service breakpoint-based TXM page preparation during
+	// dyld initializers. Publish the deferred pre-main JIT stubs only when the
+	// user starts emulation, after StikDebug has had time to attach its script.
+	utils::memory_activate_stikdebug_jit();
+#endif
+
 	// Disable some incompatible settings in headless mode
 	if (Emu.IsHeadless())
 	{
@@ -338,20 +346,27 @@ static void fixup_settings(const psf::registry* _psf)
 
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 	// LLVM's MCJIT writes and relocations are not callback-scoped yet. Keep the
-	// initial iOS port on the ASMJIT-backed static interpreter path until that
-	// memory manager has a staging/finalization implementation.
-	if (g_cfg.core.ppu_decoder != ppu_decoder_type::_static)
+	// interpreter fallback when MAP_JIT requires Apple's write callback. A
+	// debug-authorized runtime using a direct executable mapping does not have
+	// that restriction and can run the LLVM decoders normally.
+	const bool jit_callback_required = utils::memory_uses_jit_write_callback();
+	if (jit_callback_required && g_cfg.core.ppu_decoder != ppu_decoder_type::_static)
 	{
 		sys_log.warning("The PPU decoder '%s' is not yet callback-safe on iOS and will be changed to '%s' during emulation.",
 			g_cfg.core.ppu_decoder.get(), ppu_decoder_type::_static);
 		g_cfg.core.ppu_decoder.set(ppu_decoder_type::_static);
 	}
 
-	if (g_cfg.core.spu_decoder != spu_decoder_type::_static)
+	if (jit_callback_required && g_cfg.core.spu_decoder != spu_decoder_type::_static)
 	{
 		sys_log.warning("The SPU decoder '%s' is not yet callback-safe on iOS and will be changed to '%s' during emulation.",
 			g_cfg.core.spu_decoder.get(), spu_decoder_type::_static);
 		g_cfg.core.spu_decoder.set(spu_decoder_type::_static);
+	}
+
+	if (!jit_callback_required)
+	{
+		sys_log.notice("Using LLVM CPU decoders with the debug-authorized direct executable-memory fallback on iOS.");
 	}
 #endif
 

@@ -2,6 +2,10 @@
 
 #include "util/types.hpp"
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
 enum class pad_handler
 {
 	null,
@@ -20,6 +24,9 @@ enum class pad_handler
 #endif
 #ifdef HAVE_LIBEVDEV
 	evdev,
+#endif
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+	ios,
 #endif
 };
 

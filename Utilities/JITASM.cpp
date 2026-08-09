@@ -21,6 +21,8 @@
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 namespace
 {
+	std::mutex s_jit_fallback_write_mutex;
+
 	struct jit_copy_context
 	{
 		void* dst;
@@ -86,7 +88,12 @@ void jit_write_copy(void* dst, const void* src, usz size) noexcept
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 	if (!utils::memory_uses_jit_write_callback())
 	{
+		std::lock_guard lock(s_jit_fallback_write_mutex);
+		utils::memory_protect(dst, size, utils::protection::rw);
 		std::memcpy(dst, src, size);
+		asmjit::VirtMem::flushInstructionCache(dst, size);
+		utils::memory_protect(dst, size, utils::protection::rx);
+		return;
 	}
 	else if (__builtin_available(iOS 17.4, *))
 	{
@@ -113,7 +120,12 @@ void jit_write_atomic128(void* dst, u128 value) noexcept
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 	if (!utils::memory_uses_jit_write_callback())
 	{
+		std::lock_guard lock(s_jit_fallback_write_mutex);
+		utils::memory_protect(dst, sizeof(value), utils::protection::rw);
 		atomic_storage<u128>::release(*static_cast<u128*>(dst), value);
+		asmjit::VirtMem::flushInstructionCache(dst, sizeof(value));
+		utils::memory_protect(dst, sizeof(value), utils::protection::rx);
+		return;
 	}
 	else if (__builtin_available(iOS 17.4, *))
 	{
@@ -250,6 +262,10 @@ static u8* get_jit_memory()
 // Allocation counters (1G code, 1G data subranges)
 static atomic_t<u64> s_code_pos{0}, s_data_pos{0};
 
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+static std::atomic_bool s_jit_runtime_initialized{false};
+#endif
+
 // Snapshot of code generated before main()
 static std::vector<u8> s_code_init, s_data_init;
 
@@ -293,7 +309,11 @@ static u8* add_jit_memory(usz size, usz align)
 		// Check the necessity to commit more memory
 		if (_new > olda) [[unlikely]]
 		{
+		#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+			newa = utils::align(_new, static_cast<u64>(utils::get_page_size()));
+		#else
 			newa = utils::align(_new, 0x200000);
+		#endif
 		}
 
 		ctr += _new - (ctr & 0xffff'ffff);
@@ -353,6 +373,25 @@ void* jit_runtime_base::_add(asmjit::CodeHolder* code, usz align) noexcept
 		asmjit::VirtMem::ProtectJitReadWriteScope rwScope(p, codeSize);
 #endif
 
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+		if (!utils::memory_uses_jit_write_callback() && s_jit_runtime_initialized.load(std::memory_order_relaxed))
+		{
+			std::lock_guard lock(s_jit_fallback_write_mutex);
+			for (asmjit::Section* section : code->_sections)
+			{
+				if (section->offset() + section->bufferSize() > utils::align<usz>(codeSize, align))
+				{
+					fmt::throw_exception("CodeHolder section exceeds range: Section->offset: 0x%x, Section->bufferSize: 0x%x, alloted-memory=0x%x", section->offset(), section->bufferSize(), utils::align<usz>(codeSize, align));
+				}
+
+				std::memcpy(p + section->offset(), section->data(), section->bufferSize());
+			}
+			asmjit::VirtMem::flushInstructionCache(p, codeSize);
+			utils::memory_protect(p, codeSize, utils::protection::rx);
+			return p;
+		}
+#endif
+
 		for (asmjit::Section* section : code->_sections)
 		{
 			if (section->offset() + section->bufferSize() > utils::align<usz>(codeSize, align))
@@ -377,6 +416,12 @@ jit_runtime::~jit_runtime()
 
 uchar* jit_runtime::_alloc(usz size, usz align) noexcept
 {
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	if (!utils::memory_uses_jit_write_callback() && s_jit_runtime_initialized.load(std::memory_order_relaxed))
+	{
+		align = std::max<usz>(align, utils::get_page_size());
+	}
+#endif
 	return jit_runtime::alloc(size, align, true);
 }
 
@@ -421,12 +466,25 @@ void jit_runtime::initialize()
 	std::memcpy(s_code_init.data(), alloc(0, 0, true), s_code_init.size());
 	s_data_init.resize(s_data_pos & 0xffff'ffff);
 	std::memcpy(s_data_init.data(), alloc(0, 0, false), s_data_init.size());
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	s_jit_runtime_initialized.store(true, std::memory_order_relaxed);
+#endif
 }
 
 void jit_runtime::finalize() noexcept
 {
 #if defined(__APPLE__) && !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
 	jit_write_protect(false);
+#endif
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	if (!utils::memory_uses_jit_write_callback())
+	{
+		// vPhone's fallback mappings permit RW -> RX but not RX -> RW. Keep
+		// retired code/data and continue allocating monotonically instead of
+		// rewinding into pages that can no longer be made writable.
+		asm("ISB");
+		return;
+	}
 #endif
 	// Reset JIT memory
 #ifdef CAN_OVERCOMMIT

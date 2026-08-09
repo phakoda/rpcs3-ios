@@ -185,6 +185,18 @@ add_library(rpcs3_ui STATIC
     "../resources.qrc"
 )
 
+if(RPCS3_IOS)
+    target_sources(rpcs3_ui PRIVATE
+        ../Input/ios_controller_bridge.mm
+        ../Input/ios_pad_handler.cpp)
+    set_source_files_properties(../Input/ios_controller_bridge.mm PROPERTIES
+        COMPILE_OPTIONS "-fobjc-arc")
+    target_link_libraries(rpcs3_ui PRIVATE
+        "-framework CoreHaptics"
+        "-framework GameController"
+        "-framework UIKit")
+endif()
+
 if(HAS_MEMORY_BREAKPOINTS)
     target_compile_definitions(rpcs3_ui PRIVATE RPCS3_HAS_MEMORY_BREAKPOINTS)
 endif()

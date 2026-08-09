@@ -12,6 +12,9 @@ project(rpcs3 LANGUAGES C CXX)
 set(RPCS3_IOS OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     set(RPCS3_IOS ON)
+    enable_language(OBJCXX)
+    option(RPCS3_IOS_STIKDEBUG
+        "Enable the StikDebug universal-script JIT page handshake for stock iOS devices" OFF)
 
     if(NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
         message(FATAL_ERROR "The initial RPCS3 iOS port supports arm64 only. Set CMAKE_OSX_ARCHITECTURES=arm64.")

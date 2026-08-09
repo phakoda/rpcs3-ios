@@ -25,6 +25,10 @@
 #include <optional>
 #include <unordered_set>
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
 #include "util/v128.hpp"
 #include "util/simd.hpp"
 #include "util/sysinfo.hpp"
@@ -9282,6 +9286,13 @@ struct spu_llvm
 		{
 			worker_count = 2;
 		}
+
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+		// Match the PPU compiler's iOS VM-pressure limit. Each LLVM worker owns
+		// an executable-memory arena, so parallel workers can exceed vPhone's
+		// per-process virtual-memory allowance even when physical RAM is free.
+		worker_count = 1;
+#endif
 
 		u32 worker_index = 0;
 		u32 notify_compile_count = 0;

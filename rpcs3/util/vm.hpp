@@ -41,6 +41,14 @@ namespace utils
 	// executable mappings when the kernel rejects MAP_JIT with EPERM.
 	bool memory_uses_jit_write_callback() noexcept;
 
+	// Forget StikDebug page preparation when an iOS JIT range is replaced.
+	// This is a no-op in builds that do not use the StikDebug handshake.
+	void memory_forget_stikdebug_jit_pages(void* pointer, usz size) noexcept;
+
+	// Enable deferred StikDebug page publication once the user starts emulation.
+	// Pre-main JIT stubs remain writable until this point so launch can complete.
+	void memory_activate_stikdebug_jit();
+
 	/**
 	* Commit `size` bytes of virtual memory starting at pointer.
 	* That is, bake reserved memory with physical memory.

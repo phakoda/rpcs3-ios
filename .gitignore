@@ -118,6 +118,10 @@ CMakeLists.txt.user
 # macOS
 .DS_Store
 
+# iOS distribution artifacts
+*.ipa
+*.tipa
+
 # yaml-cpp
 yaml-cpp.pc
 

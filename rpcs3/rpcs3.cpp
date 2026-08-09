@@ -59,6 +59,7 @@ DYNAMIC_IMPORT("ntdll.dll", NtSetTimerResolution, NTSTATUS(ULONG DesiredResoluti
 
 #if defined(__APPLE__)
 #include <dispatch/dispatch.h>
+#include <TargetConditionals.h>
 #endif
 
 #include "Utilities/Config.h"
@@ -229,6 +230,19 @@ std::set<std::string> get_one_drive_paths()
 	}
 
 	const bool local = s_qt_init.try_lock();
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+	// UIApplicationMain must own Qt's iOS platform initialization. Fatal errors
+	// raised by global constructors happen before that point, so constructing a
+	// temporary QApplication here only hides the original failure behind Qt's
+	// "QApplication before UIApplicationMain" abort. Preserve the real message
+	// in the device console and crash report instead.
+	if (local)
+	{
+		utils::output_stderr(fmt::format("RPCS3: %s\n", text));
+		std::abort();
+	}
+#endif
 
 	// Possibly created and assigned here
 	static QScopedPointer<QCoreApplication> app;

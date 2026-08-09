@@ -714,10 +714,14 @@ namespace rsx
 
 			if (g_cfg.misc.play_music_during_boot)
 			{
+#if TARGET_OS_IPHONE
+				rsx_log.notice("Skipping SND0.AT3 boot music on iOS because the Qt CoreAudio sink is unavailable");
+#else
 				if (const std::string audio_path = Emu.GetSfoDir(true) + "/SND0.AT3"; fs::is_file(audio_path))
 				{
 					m_overlay_manager->start_audio(audio_path);
 				}
+#endif
 			}
 		}
 

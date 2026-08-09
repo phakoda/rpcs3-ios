@@ -2,6 +2,8 @@
 
 #include "Emu/Audio/AudioBackend.h"
 
+LOG_CHANNEL(NullAudio, "Null Audio");
+
 class NullAudioBackend final : public AudioBackend
 {
 public:
@@ -10,9 +12,16 @@ public:
 
 	std::string_view GetName() const override { return "Null"sv; }
 
-	bool Open(std::string_view /* dev_id */, AudioFreq /* freq */, AudioSampleSize /* sample_size */, AudioChannelCnt /* ch_cnt */, audio_channel_layout /*layout*/) override
+	bool Open(std::string_view /* dev_id */, AudioFreq freq, AudioSampleSize sample_size, AudioChannelCnt ch_cnt, audio_channel_layout layout) override
 	{
 		Close();
+
+		m_sampling_rate = freq;
+		m_sample_size = sample_size;
+
+		const u32 channels = static_cast<u32>(ch_cnt);
+		setup_channel_layout(channels, channels, layout, NullAudio);
+
 		return true;
 	}
 	void Close() override { m_playing = false; }

@@ -11,8 +11,10 @@
 #include "Crypto/unzip.h"
 
 #include <charconv>
+#include <mutex>
 
 #if defined(__APPLE__)
+#include <libkern/OSCacheControl.h>
 #include <pthread.h>
 #endif
 
@@ -94,9 +96,21 @@ namespace
 
 const bool jit_initialize = []() -> bool
 {
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	// LLVM derives its "native" architecture from the macOS build host while
+	// cross-compiling for iOS.  With an AArch64-only LLVM build that leaves the
+	// LLVM_NATIVE_TARGET macros undefined, so InitializeNativeTarget() becomes
+	// a no-op and MCJIT later reports that no targets are registered.  Register
+	// the targets actually compiled into the target-side LLVM instead.
+	llvm::InitializeAllTargets();
+	llvm::InitializeAllTargetMCs();
+	llvm::InitializeAllAsmPrinters();
+	llvm::InitializeAllAsmParsers();
+#else
 	llvm::InitializeNativeTarget();
 	llvm::InitializeNativeTargetAsmPrinter();
 	llvm::InitializeNativeTargetAsmParser();
+#endif
 	LLVMLinkInMCJIT();
 	return true;
 }();
@@ -219,11 +233,24 @@ struct JITAnnouncer : llvm::JITEventListener
 // Simple memory manager
 struct MemoryManager1 : llvm::RTDyldMemoryManager
 {
+	// Direct RWX mappings count against vPhone's process memory allowance even
+	// before LLVM writes code into them. Per-module iOS compilers need a small
+	// fraction of the desktop reservation, so avoid committing 768 MiB across
+	// the three regions merely by constructing the memory manager.
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	static constexpr u64 c_max_size = 0x0200'0000; // 32 MiB for code or data
+#else
 	// 256 MiB for code or data
 	static constexpr u64 c_max_size = 0x1000'0000;
+#endif
 
+	// Avoid consuming vPhone's small executable-map allowance in 2 MiB steps.
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	static constexpr u64 c_page_size = 512 * 1024;
+#else
 	// Allocation unit (2M)
 	static constexpr u64 c_page_size = 2 * 1024 * 1024;
+#endif
 
 	// Reserve 256 MiB blocks
 	void* m_code_mems = nullptr;
@@ -233,15 +260,62 @@ struct MemoryManager1 : llvm::RTDyldMemoryManager
 	u64 code_ptr = 0;
 	u64 data_ro_ptr = 0;
 	u64 data_rw_ptr = 0;
+	bool m_code_finalized = false;
+	bool m_executable = true;
+	u64 m_code_committed = 0;
+	u64 m_data_rw_committed = 0;
+
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	struct recycled_arena
+	{
+		void* base;
+		u64 code_committed;
+		u64 data_rw_committed;
+	};
+
+	inline static std::mutex s_recycled_mutex;
+	inline static std::vector<recycled_arena> s_recycled_arenas;
+#endif
 
 	// First fallback for non-existing symbols
 	// May be a memory container internally
 	std::function<u64(const std::string&)> m_symbols_cement;
 
-	MemoryManager1(std::function<u64(const std::string&)> symbols_cement = {}) noexcept
-		: m_symbols_cement(std::move(symbols_cement))
+	MemoryManager1(std::function<u64(const std::string&)> symbols_cement = {}, bool executable = true) noexcept
+		: m_executable(executable)
+		, m_symbols_cement(std::move(symbols_cement))
 	{
-		auto ptr = reinterpret_cast<u8*>(utils::memory_reserve(c_max_size * 3, true));
+		u8* ptr = nullptr;
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+		if (m_executable && !utils::memory_uses_jit_write_callback())
+		{
+			std::lock_guard lock(s_recycled_mutex);
+			if (!s_recycled_arenas.empty())
+			{
+				const recycled_arena arena = s_recycled_arenas.back();
+				s_recycled_arenas.pop_back();
+				ptr = static_cast<u8*>(arena.base);
+				m_code_committed = arena.code_committed;
+				m_data_rw_committed = arena.data_rw_committed;
+				if (m_code_committed)
+				{
+					utils::memory_protect(ptr, m_code_committed, utils::protection::rw);
+				}
+				if (m_data_rw_committed)
+				{
+					std::memset(ptr + c_max_size, 0, m_data_rw_committed);
+				}
+				jit_log.notice("LLVM JIT arena recycled: base=%p, code=0x%x, data=0x%x",
+					ptr, m_code_committed, m_data_rw_committed);
+			}
+		}
+#endif
+		if (!ptr)
+		{
+			ptr = reinterpret_cast<u8*>(utils::memory_reserve(c_max_size * 3, m_executable));
+		}
+		jit_log.notice("LLVM JIT arena reserve: base=%p, size=0x%x, callback=%d",
+			ptr, c_max_size * 3, utils::memory_uses_jit_write_callback());
 		m_code_mems = ptr;
 		// ptr += c_max_size;
 		// m_data_ro_mems = ptr;
@@ -255,12 +329,42 @@ struct MemoryManager1 : llvm::RTDyldMemoryManager
 
 	~MemoryManager1() override
 	{
+	#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+		if (m_executable && !utils::memory_uses_jit_write_callback())
+		{
+			// TXM's executable-map allowance is not immediately returned when a
+			// mapping is unmapped. Preserve and recycle retired runtime arenas so a
+			// later module reuses already-authorized pages instead of exhausting the
+			// allowance through repeated mmap(MAP_FIXED, PROT_EXEC) calls.
+			std::lock_guard lock(s_recycled_mutex);
+			s_recycled_arenas.push_back({m_code_mems, m_code_committed, m_data_rw_committed});
+		}
+		else
+		{
+			utils::memory_release(m_code_mems, c_max_size * 3);
+		}
+	#else
 		// Hack: don't release to prevent reuse of address space, see jit_announce
 		// constexpr auto how_much = [](u64 pos) { return utils::align(pos, pos < c_page_size ? c_page_size / 4 : c_page_size); };
 		// utils::memory_decommit(m_code_mems, how_much(code_ptr));
 		// utils::memory_decommit(m_data_ro_mems, how_much(data_ro_ptr));
 		// utils::memory_decommit(m_data_rw_mems, how_much(data_rw_ptr));
 		utils::memory_decommit(m_code_mems, c_max_size * 3, true);
+	#endif
+	}
+
+	void commit_if_needed(void* block, u64 offset, u64 size, utils::protection prot)
+	{
+		u64& committed = block == m_code_mems ? m_code_committed : m_data_rw_committed;
+		const u64 end = offset + size;
+		if (end <= committed)
+		{
+			return;
+		}
+
+		const u64 begin = std::max(offset, committed);
+		utils::memory_commit(static_cast<u8*>(block) + begin, end - begin, prot);
+		committed = end;
 	}
 
 	llvm::JITSymbol findSymbol(const std::string& name) override
@@ -327,7 +431,11 @@ struct MemoryManager1 : llvm::RTDyldMemoryManager
 		{
 			const u64 pagea = utils::align(oldp, page_quarter);
 			const u64 psize = utils::align(std::min(newp, c_page_size) - pagea, page_quarter);
-			utils::memory_commit(reinterpret_cast<u8*>(block) + (pagea % c_max_size), psize, prot);
+			jit_log.notice("LLVM JIT initial section commit: block=%p, offset=0x%x, size=0x%x, prot=%d",
+				block, pagea % c_max_size, psize, static_cast<int>(prot));
+			commit_if_needed(block, pagea % c_max_size, psize, prot);
+			jit_log.notice("LLVM JIT initial section commit complete: block=%p, offset=0x%x, size=0x%x",
+				block, pagea % c_max_size, psize);
 
 			// Advance
 			oldp = pagea + psize;
@@ -338,7 +446,11 @@ struct MemoryManager1 : llvm::RTDyldMemoryManager
 			// Allocate pages on demand
 			const u64 pagea = utils::align(oldp, c_page_size);
 			const u64 psize = utils::align(newp - pagea, c_page_size);
-			utils::memory_commit(reinterpret_cast<u8*>(block) + (pagea % c_max_size), psize, prot);
+			jit_log.notice("LLVM JIT section commit: block=%p, offset=0x%x, size=0x%x, prot=%d",
+				block, pagea % c_max_size, psize, static_cast<int>(prot));
+			commit_if_needed(block, pagea % c_max_size, psize, prot);
+			jit_log.notice("LLVM JIT section commit complete: block=%p, offset=0x%x, size=0x%x",
+				block, pagea % c_max_size, psize);
 		}
 
 		return reinterpret_cast<u8*>(block) + (olda % c_max_size);
@@ -346,7 +458,24 @@ struct MemoryManager1 : llvm::RTDyldMemoryManager
 
 	u8* allocateCodeSection(uptr size, uint align, uint /*sec_id*/, llvm::StringRef /*sec_name*/) override
 	{
-		return allocate(code_ptr, m_code_mems, size, align, utils::protection::wx);
+		auto protection = utils::protection::wx;
+	#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+		if (!m_executable)
+		{
+			protection = utils::protection::rw;
+		}
+
+		// vPhone's non-MAP_JIT fallback enforces W^X even when a mapping's
+		// maximum protection includes both write and execute. MCJIT can append
+		// code after an earlier finalize, so make the existing code range
+		// writable again before LLVM touches it and restore RX in finalizeMemory.
+		if (m_executable && m_code_finalized && !utils::memory_uses_jit_write_callback())
+		{
+			utils::memory_protect(m_code_mems, utils::align(code_ptr, utils::get_page_size()), utils::protection::rw);
+			m_code_finalized = false;
+		}
+	#endif
+		return allocate(code_ptr, m_code_mems, size, align, protection);
 	}
 
 	u8* allocateDataSection(uptr size, uint align, uint /*sec_id*/, llvm::StringRef /*sec_name*/, bool is_ro) override
@@ -362,6 +491,16 @@ struct MemoryManager1 : llvm::RTDyldMemoryManager
 
 	bool finalizeMemory(std::string* = nullptr) override
 	{
+	#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+		if (m_executable && code_ptr && !utils::memory_uses_jit_write_callback())
+		{
+			const usz code_size = utils::align(code_ptr, utils::get_page_size());
+			::sys_icache_invalidate(m_code_mems, code_size);
+			utils::memory_protect(m_code_mems, code_size, utils::protection::rx);
+			m_code_finalized = true;
+			jit_log.notice("LLVM JIT code finalized RX: base=%p, size=0x%x", m_code_mems, code_size);
+		}
+	#endif
 		return false;
 	}
 
@@ -380,6 +519,10 @@ struct MemoryManager2 : llvm::RTDyldMemoryManager
 	// First fallback for non-existing symbols
 	// May be a memory container internally
 	std::function<u64(const std::string&)> m_symbols_cement;
+
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	std::vector<std::pair<u8*, usz>> m_pending_code;
+#endif
 
 	MemoryManager2(std::function<u64(const std::string&)> symbols_cement = {}) noexcept
 		: m_symbols_cement(std::move(symbols_cement))
@@ -414,6 +557,20 @@ struct MemoryManager2 : llvm::RTDyldMemoryManager
 
 	u8* allocateCodeSection(uptr size, uint align, uint /*sec_id*/, llvm::StringRef /*sec_name*/) override
 	{
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+		if (!utils::memory_uses_jit_write_callback())
+		{
+			// This manager normally shares RPCS3's AsmJit pool. A prior
+			// trampoline can have finalized the current pool page RX, while LLVM
+			// writes its section directly instead of using jit_write_copy(). Keep
+			// LLVM sections page-disjoint, reopen them RW, then finalize them RX.
+			const usz page_size = utils::get_page_size();
+			u8* const result = jit_runtime::alloc(size, std::max<usz>(align, page_size), true);
+			utils::memory_protect(result, size, utils::protection::rw);
+			m_pending_code.emplace_back(result, size);
+			return result;
+		}
+#endif
 		return jit_runtime::alloc(size, align, true);
 	}
 
@@ -424,6 +581,17 @@ struct MemoryManager2 : llvm::RTDyldMemoryManager
 
 	bool finalizeMemory(std::string* = nullptr) override
 	{
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+		if (!utils::memory_uses_jit_write_callback())
+		{
+			for (const auto& [pointer, size] : m_pending_code)
+			{
+				::sys_icache_invalidate(pointer, size);
+				utils::memory_protect(pointer, size, utils::protection::rx);
+			}
+			m_pending_code.clear();
+		}
+#endif
 		return false;
 	}
 
@@ -685,6 +853,15 @@ jit_compiler::jit_compiler(const std::unordered_map<std::string, u64>& _link, st
 	: m_context(new llvm::LLVMContext)
 	, m_cpu(cpu(_cpu))
 {
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	// The vPhone CPU is reported as an Apple host model, but RPCS3 deliberately
+	// targets the Android AArch64 ABI to reserve x18. Combining that ABI triple
+	// with the Apple-specific scheduler model fails during target-machine
+	// construction on the iOS cross-build. Keep RPCS3's explicit feature list
+	// while using LLVM's ABI-neutral AArch64 CPU model.
+	m_cpu = "generic";
+#endif
+
 	[[maybe_unused]] static const bool s_install_llvm_error_handler = []()
 	{
 		llvm::remove_fatal_error_handler();
@@ -720,7 +897,7 @@ jit_compiler::jit_compiler(const std::unordered_map<std::string, u64>& _link, st
 		// Auxiliary JIT (does not use custom memory manager, only writes the objects)
 		if (flags & 0x1)
 		{
-			mem = std::make_unique<MemoryManager1>(std::move(symbols_cement));
+			mem = std::make_unique<MemoryManager1>(std::move(symbols_cement), false);
 		}
 		else
 		{
@@ -771,6 +948,8 @@ jit_compiler::jit_compiler(const std::unordered_map<std::string, u64>& _link, st
 #endif
 
 	{
+		jit_log.notice("LLVM engine creation begin: triple='%s', cpu='%s', flags=0x%x",
+			null_mod->getTargetTriple(), m_cpu, flags);
 		m_engine.reset(llvm::EngineBuilder(std::move(null_mod))
 			.setErrorStr(&result)
 			.setEngineKind(llvm::EngineKind::JIT)
@@ -784,6 +963,7 @@ jit_compiler::jit_compiler(const std::unordered_map<std::string, u64>& _link, st
 			.setMAttrs(attributes)
 			.setMCPU(m_cpu)
 			.create());
+		jit_log.notice("LLVM engine creation complete: engine=%p, error='%s'", m_engine.get(), result);
 	}
 
 	if (!_link.empty())
@@ -796,8 +976,10 @@ jit_compiler::jit_compiler(const std::unordered_map<std::string, u64>& _link, st
 
 	if (!_link.empty() || !(flags & 0x1))
 	{
+		jit_log.notice("LLVM JIT listener registration begin");
 		m_engine->RegisterJITEventListener(llvm::JITEventListener::createIntelJITEventListener());
 		m_engine->RegisterJITEventListener(new JITAnnouncer);
+		jit_log.notice("LLVM JIT listener registration complete");
 	}
 
 	if (!m_engine)

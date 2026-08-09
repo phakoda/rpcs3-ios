@@ -11,6 +11,10 @@
 #include <QPropertyAnimation>
 #include <QFile>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 struct qt_audio_instance
 {
 	static constexpr u32 gui_index = 0;
@@ -259,6 +263,13 @@ void qt_video_source::stop_movie()
 
 void qt_video_source::start_audio()
 {
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	// Qt's CoreAudio sink reports an unusable buffer size under vPhone and
+	// throws std::bad_alloc while selecting a game with SND0 hover music.
+	// Keep video previews available, but leave preview/boot audio muted.
+	return;
+#endif
+
 	if (m_audio_path.isEmpty()) return;
 
 	qt_audio_instance& audio = ::at32(s_audio_instance, m_audio_instance_index);
