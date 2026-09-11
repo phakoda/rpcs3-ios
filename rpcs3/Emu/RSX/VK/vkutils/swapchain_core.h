@@ -80,6 +80,11 @@ namespace vk
 			return dev;
 		}
 
+		VkExtent2D get_extent() const
+		{
+			return {m_width, m_height};
+		}
+
 		VkFormat get_surface_format() const
 		{
 			return m_surface_format;
@@ -184,8 +189,10 @@ namespace vk
 
 		~swapchain_WSI() override = default;
 
-		void create(display_handle_t&) override
-		{}
+		void create(display_handle_t& handle) override
+		{
+			window_handle = handle;
+		}
 
 		void destroy(bool = true) override;
 
@@ -201,7 +208,9 @@ namespace vk
 
 		VkResult acquire_next_swapchain_image(VkSemaphore semaphore, u64 timeout, u32* result) override
 		{
-			return vkAcquireNextImageKHR(dev, m_vk_swapchain, timeout, semaphore, VK_NULL_HANDLE, result);
+			if (!m_vk_swapchain)
+				return VK_ERROR_OUT_OF_DATE_KHR;
+			return _vkAcquireNextImageKHR(dev, m_vk_swapchain, timeout, semaphore, VK_NULL_HANDLE, result);
 		}
 
 		void end_frame(command_buffer& /*cmd*/, u32 /*index*/) override

@@ -175,7 +175,6 @@ namespace vk
 	struct frame_context_t
 	{
 		VkSemaphore acquire_signal_semaphore = VK_NULL_HANDLE;
-		VkSemaphore present_wait_semaphore = VK_NULL_HANDLE;
 
 		rsx::flags32_t flags = 0;
 
@@ -189,20 +188,18 @@ namespace vk
 		{
 			VkSemaphoreCreateInfo semaphore_info = {};
 			semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-			vkCreateSemaphore(dev, &semaphore_info, nullptr, &present_wait_semaphore);
-			vkCreateSemaphore(dev, &semaphore_info, nullptr, &acquire_signal_semaphore);
+			CHECK_RESULT(vkCreateSemaphore(dev, &semaphore_info, nullptr, &acquire_signal_semaphore));
 		}
 
 		void destroy(VkDevice dev)
 		{
-			vkDestroySemaphore(dev, present_wait_semaphore, nullptr);
 			vkDestroySemaphore(dev, acquire_signal_semaphore, nullptr);
+			acquire_signal_semaphore = VK_NULL_HANDLE;
 		}
 
 		// Copy shareable information
 		void grab_resources(frame_context_t& other)
 		{
-			present_wait_semaphore = other.present_wait_semaphore;
 			acquire_signal_semaphore = other.acquire_signal_semaphore;
 			flags = other.flags;
 			heap_snapshot = other.heap_snapshot;

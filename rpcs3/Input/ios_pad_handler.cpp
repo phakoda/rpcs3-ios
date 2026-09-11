@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "ios_pad_handler.h"
+#include "ios_input_policy.h"
 #include "Emu/Io/pad_config.h"
 
 #include <algorithm>
@@ -12,9 +13,7 @@ namespace
 
 	u16 axis_value(float value, bool positive)
 	{
-		value = std::clamp(value, -1.0f, 1.0f);
-		const float directed = positive ? value : -value;
-		return static_cast<u16>(std::max(0.0f, directed) * 32767.0f);
+		return ios_input::axis_value(value, positive);
 	}
 
 	u16 pressed(bool value)
@@ -59,7 +58,9 @@ ios_pad_handler::ios_pad_handler()
 
 ios_pad_handler::~ios_pad_handler()
 {
-	ios_controller_stop();
+	// Configuration-only instances never acquired a controller-manager client.
+	if (m_is_init)
+		ios_controller_stop();
 }
 
 std::string ios_pad_handler::device_name(std::size_t index)
@@ -186,8 +187,8 @@ std::unordered_map<u32, u16> ios_pad_handler::get_button_values(const std::share
 		{left_shoulder, pressed(state.left_shoulder)}, {right_shoulder, pressed(state.right_shoulder)},
 		{left_stick, pressed(state.left_stick)}, {right_stick, pressed(state.right_stick)},
 		{menu, pressed(state.menu)}, {options, pressed(state.options)}, {home, pressed(state.home)},
-		{left_trigger, static_cast<u16>(state.left_trigger * 255.0f)},
-		{right_trigger, static_cast<u16>(state.right_trigger * 255.0f)},
+		{left_trigger, ios_input::trigger_value(state.left_trigger)},
+		{right_trigger, ios_input::trigger_value(state.right_trigger)},
 		{left_x_negative, axis_value(state.left_x, false)},
 		{left_x_positive, axis_value(state.left_x, true)},
 		{left_y_negative, axis_value(state.left_y, false)},
@@ -227,7 +228,7 @@ u32 ios_pad_handler::get_battery_level(const std::string& pad_id)
 	ios_controller_snapshot snapshot{};
 	const int index = device_index(pad_id);
 	return index >= 0 && ios_controller_read(index, snapshot)
-		? static_cast<u32>(snapshot.battery_level * 100.0f) : 0;
+		? static_cast<u32>(ios_input::battery_level(snapshot.battery_level) * 100.0f) : 0;
 }
 
 void ios_pad_handler::get_extended_info(const pad_ensemble& binding)
@@ -239,9 +240,9 @@ void ios_pad_handler::get_extended_info(const pad_ensemble& binding)
 	}
 	const auto sensor = [](float value, float scale)
 	{
-		return static_cast<u16>(std::clamp(512.0f + value * scale, 0.0f, 1023.0f));
+		return ios_input::sensor_value(value, scale);
 	};
-	binding.pad->m_battery_level = static_cast<u8>(std::clamp(ios->snapshot.battery_level * 5.0f, 0.0f, 5.0f));
+	binding.pad->m_battery_level = static_cast<u8>(ios_input::battery_level(ios->snapshot.battery_level) * 5.0f);
 	binding.pad->m_cable_state = ios->snapshot.charging ? 1 : 0;
 	binding.pad->m_sensors[0].m_value = sensor(ios->snapshot.acceleration_x, 113.0f);
 	binding.pad->m_sensors[1].m_value = sensor(ios->snapshot.acceleration_y, 113.0f);
@@ -260,7 +261,12 @@ void ios_pad_handler::apply_pad_data(const pad_ensemble& binding)
 	const u8 large = ios->config->get_large_motor_speed(binding.pad->m_vibrate_motors);
 	const u8 small = ios->config->get_small_motor_speed(binding.pad->m_vibrate_motors);
 	const auto now = steady_clock::now();
-	if (ios->large_motor != large || ios->small_motor != small || now - ios->last_output > min_output_interval)
+	const bool changed = ios->large_motor != large || ios->small_motor != small;
+	const bool active = large != 0 || small != 0;
+	// Coalesce rapid amplitude changes, but send stop immediately and never
+	// enqueue idle zero-intensity heartbeats on the UIKit main queue.
+	if ((changed && (!active || now - ios->last_output >= 20ms)) ||
+		(active && now - ios->last_output > min_output_interval))
 	{
 		ios->large_motor = large;
 		ios->small_motor = small;

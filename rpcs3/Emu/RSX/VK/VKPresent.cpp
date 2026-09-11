@@ -17,6 +17,31 @@ extern atomic_t<recording_mode> g_recording_mode;
 
 namespace
 {
+	constexpr VkPipelineStageFlags swapchain_acquire_stages =
+		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+	void transition_present_image(const vk::command_buffer& cmd, VkImage image,
+		VkImageLayout old_layout, VkImageLayout new_layout, const VkImageSubresourceRange& range)
+	{
+		if (old_layout != VK_IMAGE_LAYOUT_UNDEFINED)
+		{
+			vk::change_image_layout(cmd, image, old_layout, new_layout, range);
+			return;
+		}
+		ensure(new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL || new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+		if (vk::is_renderpass_open(cmd))
+			vk::end_renderpass(cmd);
+		const bool transfer = new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		const VkPipelineStageFlags destination_stage = transfer
+			? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		const VkAccessFlags destination_access = transfer ? VK_ACCESS_TRANSFER_WRITE_BIT
+			: VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		// The first layout transition must itself follow image acquisition.
+		// TOP_OF_PIPE as the source would not chain with our later-stage wait.
+		vk::insert_image_memory_barrier(cmd, image, old_layout, new_layout,
+			swapchain_acquire_stages, destination_stage, 0, destination_access, range);
+	}
+
 	VkFormat RSX_display_format_to_vk_format(u8 format)
 	{
 		switch (format)
@@ -34,15 +59,27 @@ namespace
 	}
 }
 
+void VKGSRender::reset_present_semaphores()
+{
+	// Call only at initialization or after draining the old device work. The
+	// existing unextended-WSI teardown still relies on vkDeviceWaitIdle.
+	m_present_semaphores.clear();
+	if (m_swapchain->is_headless())
+		return;
+	m_present_semaphores.reserve(m_swapchain->get_swap_image_count());
+	for (u32 i = 0; i < m_swapchain->get_swap_image_count(); ++i)
+		m_present_semaphores.push_back(std::make_unique<vk::semaphore>(*m_device));
+}
+
 bool VKGSRender::reinitialize_swapchain()
 {
-	m_swapchain_dims.width = m_frame->client_width();
-	m_swapchain_dims.height = m_frame->client_height();
+	m_swapchain_requested_dims.width = m_frame->client_width();
+	m_swapchain_requested_dims.height = m_frame->client_height();
 
 	// Reject requests to acquire new swapchain if the window is minimized
 	// The NVIDIA driver will spam VK_ERROR_OUT_OF_DATE_KHR if you try to acquire an image from the swapchain and the window is minimized
 	// However, any attempt to actually renew the swapchain will crash the driver with VK_ERROR_DEVICE_LOST while the window is in this state
-	if (m_swapchain_dims.width == 0 || m_swapchain_dims.height == 0)
+	if (m_swapchain_requested_dims.width == 0 || m_swapchain_requested_dims.height == 0)
 	{
 		swapchain_unavailable = true;
 		return false;
@@ -77,29 +114,33 @@ bool VKGSRender::reinitialize_swapchain()
 	}
 	ensure(m_queued_frames.empty());
 
-	// Discard the current upscaling pipeline if any
+	// Drain all the queues before destroying presentation resources.
+	CHECK_RESULT(vkDeviceWaitIdle(*m_device));
 	m_upscaler.reset();
 
-	// Drain all the queues
-	vkDeviceWaitIdle(*m_device);
+	// Cached image views must be retired before their swapchain images. A
+	// recycled VkImage handle must never find a framebuffer for a dead image.
+	for (u32 i = 0; i < m_swapchain->get_swap_image_count(); ++i)
+		vk::remove_framebuffers_with_image(m_swapchain->get_image(i));
 
-	// Reset frame context storage
-	for (auto& ctx : m_frame_context_storage)
+	// Retain the drained CPU contexts until a replacement exists. A transient
+	// zero-size surface or allocation failure must not leave flip() dereferencing
+	// an empty vector while the app waits to become drawable again.
+	if (!m_swapchain->init(m_swapchain_requested_dims.width, m_swapchain_requested_dims.height))
 	{
-		ctx.destroy(*m_device);
+		rsx_log.warning("Swapchain initialization deferred [%dx%d]", m_swapchain_requested_dims.width, m_swapchain_requested_dims.height);
+		swapchain_unavailable = true;
+		return false;
 	}
+	const auto extent = m_swapchain->get_extent();
+	m_swapchain_dims = {extent.width, extent.height};
+
+	for (auto& ctx : m_frame_context_storage)
+		ctx.destroy(*m_device);
 	m_current_frame = nullptr;
 	m_max_async_frames = 0;
 	m_current_queue_index = 0;
 	m_frame_context_storage.clear();
-
-	// Rebuild swapchain. Old swapchain destruction is handled by the init_swapchain call
-	if (!m_swapchain->init(m_swapchain_dims.width, m_swapchain_dims.height))
-	{
-		rsx_log.warning("Swapchain initialization failed. Request ignored [%dx%d]", m_swapchain_dims.width, m_swapchain_dims.height);
-		swapchain_unavailable = true;
-		return false;
-	}
 
 	// Re-initialize CPU frame contexts
 	m_max_async_frames = m_swapchain->get_swap_image_count();
@@ -110,29 +151,10 @@ bool VKGSRender::reinitialize_swapchain()
 	}
 	m_current_queue_index = 0;
 	m_current_frame = &m_frame_context_storage[0];
+	reset_present_semaphores();
 
-	// Prepare new swapchain images for use
-	for (u32 i = 0; i < m_swapchain->get_swap_image_count(); ++i)
-	{
-		const auto target_layout = m_swapchain->get_optimal_present_layout();
-		const auto target_image = m_swapchain->get_image(i);
-		VkClearColorValue clear_color{};
-		VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-		vk::change_image_layout(*m_current_command_buffer, target_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, range);
-		vkCmdClearColorImage(*m_current_command_buffer, target_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_color, 1, &range);
-		vk::change_image_layout(*m_current_command_buffer, target_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, target_layout, range);
-	}
-
-	// Will have to block until rendering is completed
-	vk::fence resize_fence(*m_device);
-
-	// Flush the command buffer
-	close_and_submit_command_buffer(&resize_fence);
-	vk::wait_for_fence(&resize_fence);
-
-	m_current_command_buffer->reset();
-	m_current_command_buffer->begin();
+	// No eager clears or resize-fence submission: acquired images are discarded
+	// and initialized in flip(), after the acquire semaphore is waited upon.
 
 	swapchain_unavailable = false;
 	should_reinitialize_swapchain = false;
@@ -149,7 +171,9 @@ void VKGSRender::present(vk::frame_context_t *ctx)
 
 	if (!swapchain_unavailable)
 	{
-		switch (VkResult error = m_swapchain->present(ctx->present_wait_semaphore, ctx->present_image))
+		const VkSemaphore wait_semaphore = m_swapchain->is_headless() ? VK_NULL_HANDLE
+			: static_cast<VkSemaphore>(*m_present_semaphores.at(ctx->present_image));
+		switch (VkResult error = m_swapchain->present(wait_semaphore, ctx->present_image))
 		{
 		case VK_SUCCESS:
 			break;
@@ -219,8 +243,8 @@ void VKGSRender::queue_swap_request()
 	{
 		close_and_submit_command_buffer(nullptr,
 			m_current_frame->acquire_signal_semaphore,
-			m_current_frame->present_wait_semaphore,
-			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT);
+			*m_present_semaphores.at(m_current_frame->present_image),
+			swapchain_acquire_stages);
 	}
 
 	// Set up a present request for this frame as well
@@ -421,8 +445,8 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 	// Check swapchain condition/status
 	if (!m_swapchain->supports_automatic_wm_reports())
 	{
-		if (m_swapchain_dims.width != m_frame->client_width() + 0u ||
-			m_swapchain_dims.height != m_frame->client_height() + 0u)
+		if (m_swapchain_requested_dims.width != m_frame->client_width() + 0u ||
+			m_swapchain_requested_dims.height != m_frame->client_height() + 0u)
 		{
 			swapchain_unavailable = true;
 		}
@@ -585,7 +609,9 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 	ensure(m_current_frame->present_image == umax);
 	ensure(m_current_frame->swap_command_buffer == nullptr);
 
-	u64 timeout = m_swapchain->get_swap_image_count() <= 2? 0ull: 100000000ull;
+	// A bounded driver wait avoids burning a CPU core on double-buffered iOS
+	// surfaces, while still allowing stop requests to be observed promptly.
+	u64 timeout = 16'000'000ull;
 	while (VkResult status = m_swapchain->acquire_next_swapchain_image(m_current_frame->acquire_signal_semaphore, timeout, &m_current_frame->present_image))
 	{
 		switch (status)
@@ -600,9 +626,15 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 			// Found on AMD Crimson 17.7.2
 
 
-			// Whatever returned from status, this is now a spin
-			timeout = 0ull;
 			check_present_status();
+			if (Emu.IsStopped())
+			{
+				m_current_frame->present_image = umax;
+				return;
+			}
+			timeout = 1'000'000ull;
+			if (status == VK_NOT_READY)
+				std::this_thread::sleep_for(1ms);
 			continue;
 		}
 		case VK_SUBOPTIMAL_KHR:
@@ -610,10 +642,13 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 			break;
 		case VK_ERROR_OUT_OF_DATE_KHR:
 			rsx_log.warning("vkAcquireNextImageKHR failed with VK_ERROR_OUT_OF_DATE_KHR. Flip request ignored until surface is recreated.");
+			m_current_frame->present_image = umax;
 			swapchain_unavailable = true;
-			reinitialize_swapchain();
-			ensure(m_current_frame, "Could not reinitialize swapchain after VK_ERROR_OUT_OF_DATE_KHR signal!");
-			continue;
+			// Rebuild at the next frame boundary, not in the middle of a flip
+			// whose source resources and acquisition semaphore are already chosen.
+			m_frame->flip(m_context);
+			rsx::thread::flip(info);
+			return;
 		default:
 			vk::die_with_error(status);
 		}
@@ -645,7 +680,9 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 	const auto present_layout = m_swapchain->get_optimal_present_layout();
 
 	const VkImageSubresourceRange subresource_range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-	VkImageLayout target_layout = present_layout;
+	// Every frame either overwrites the full image or clears the uncovered area.
+	// Discarding previous contents is legal only after acquisition, not at init.
+	VkImageLayout target_layout = VK_IMAGE_LAYOUT_UNDEFINED;
 
 	VkRenderPass single_target_pass = VK_NULL_HANDLE;
 	vk::framebuffer_holder* direct_fbo = nullptr;
@@ -756,11 +793,14 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 		}
 	}
 
-	if (!image_to_flip || aspect_ratio.x1 || aspect_ratio.y1)
+	if (!image_to_flip || aspect_ratio.x1 || aspect_ratio.y1 ||
+		aspect_ratio.x2 != s32(m_swapchain_dims.width) || aspect_ratio.y2 != s32(m_swapchain_dims.height))
 	{
 		// Clear the window background to black
 		VkClearColorValue clear_black {};
-		vk::change_image_layout(*m_current_command_buffer, target_image, present_layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, subresource_range);
+		clear_black.float32[3] = 1.f;
+		transition_present_image(*m_current_command_buffer, target_image, target_layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, subresource_range);
+		target_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 		vkCmdClearColorImage(*m_current_command_buffer, target_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_black, 1, &subresource_range);
 
 		// Prevent WAW on transfer writes
@@ -775,8 +815,6 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 			VK_ACCESS_TRANSFER_WRITE_BIT,
 			subresource_range
 		);
-
-		target_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 	}
 
 	const output_scaling_mode output_scaling = g_cfg.video.output_scaling.get();
@@ -827,7 +865,7 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 				}
 			}
 
-			vk::change_image_layout(*m_current_command_buffer, target_image, target_layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, subresource_range);
+			transition_present_image(*m_current_command_buffer, target_image, target_layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, subresource_range);
 			target_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
 			const auto key = vk::get_renderpass_key(m_swapchain->get_surface_format());
@@ -856,7 +894,7 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 
 			if (target_layout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
 			{
-				vk::change_image_layout(*m_current_command_buffer, target_image, target_layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, subresource_range);
+				transition_present_image(*m_current_command_buffer, target_image, target_layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, subresource_range);
 				target_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 			}
 
@@ -955,7 +993,7 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 
 	if (target_layout != present_layout)
 	{
-		vk::change_image_layout(*m_current_command_buffer, target_image, target_layout, present_layout, subresource_range);
+		transition_present_image(*m_current_command_buffer, target_image, target_layout, present_layout, subresource_range);
 	}
 
 	queue_swap_request();

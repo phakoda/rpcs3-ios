@@ -185,6 +185,21 @@ if(USE_VULKAN)
 					"selected iPhoneOS or iPhoneSimulator SDK (for example, libMoltenVK.a).")
 			endif()
 
+			# arm64 alone does not distinguish macOS, iPhoneOS and iPhoneSimulator.
+			# Inspect every selected archive member before attempting an expensive build.
+			find_package(Python3 3.8 REQUIRED COMPONENTS Interpreter)
+			execute_process(
+				COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/buildfiles/ios/check_moltenvk.py"
+					--library "${Vulkan_LIBRARY}" --platform "${RPCS3_IOS_PLATFORM}"
+					--deployment-target "${CMAKE_OSX_DEPLOYMENT_TARGET}"
+				RESULT_VARIABLE RPCS3_MVK_CHECK_RESULT
+				OUTPUT_VARIABLE RPCS3_MVK_CHECK_OUTPUT
+				ERROR_VARIABLE RPCS3_MVK_CHECK_ERROR
+				OUTPUT_STRIP_TRAILING_WHITESPACE)
+			if(NOT RPCS3_MVK_CHECK_RESULT EQUAL 0)
+				message(FATAL_ERROR "${RPCS3_MVK_CHECK_ERROR}")
+			endif()
+			message(STATUS "${RPCS3_MVK_CHECK_OUTPUT}")
 			message(STATUS "RPCS3: Using caller-provided MoltenVK for iOS")
 		elseif(USE_SYSTEM_MVK)
 			message(STATUS "RPCS3: Using system MoltenVK")

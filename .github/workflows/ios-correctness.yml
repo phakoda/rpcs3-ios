@@ -1,0 +1,62 @@
+name: iOS graphics and input correctness
+
+on:
+  push:
+    paths:
+      - 'CMakePresets.json'
+      - '3rdparty/CMakeLists.txt'
+      - 'rpcs3/Emu/CMakeLists.txt'
+      - 'rpcs3/Emu/RSX/Common/**'
+      - 'rpcs3/Emu/RSX/VK/**'
+      - 'rpcs3/Input/ios_*'
+      - 'buildfiles/ios/**'
+      - '.github/workflows/ios-correctness.yml'
+  pull_request:
+    paths:
+      - 'CMakePresets.json'
+      - '3rdparty/CMakeLists.txt'
+      - 'rpcs3/Emu/CMakeLists.txt'
+      - 'rpcs3/Emu/RSX/Common/**'
+      - 'rpcs3/Emu/RSX/VK/**'
+      - 'rpcs3/Input/ios_*'
+      - 'buildfiles/ios/**'
+      - '.github/workflows/ios-correctness.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-regressions:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: clang++
+            type: Debug
+            sanitizers: 'ON'
+          - compiler: g++
+            type: Release
+            sanitizers: 'OFF'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure standalone tests
+        run: >-
+          cmake -S buildfiles/ios/tests -B "$RUNNER_TEMP/ios-tests"
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.type }}
+          -DRPCS3_IOS_TEST_SANITIZERS=${{ matrix.sanitizers }}
+      - name: Build and run policy, binary-parser and source-wiring tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          cmake --build "$RUNNER_TEMP/ios-tests" --parallel 2
+          ctest --test-dir "$RUNNER_TEMP/ios-tests" --output-on-failure
+  apple-sdk-syntax:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check iPhoneOS and Simulator Objective-C++ bridges
+        run: bash buildfiles/ios/check_apple_bridges.sh

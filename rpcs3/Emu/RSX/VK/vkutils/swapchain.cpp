@@ -1,5 +1,8 @@
 #include "stdafx.h"
 #include "swapchain.h"
+#include "Emu/RSX/Common/presentation_policy.h"
+
+#include <array>
 
 namespace vk
 {
@@ -86,17 +89,15 @@ namespace vk
 	// WSI implementation
 	void swapchain_WSI::init_swapchain_images(render_device& dev, u32 /*preferred_count*/)
 	{
-		u32 nb_swap_images = 0;
-		_vkGetSwapchainImagesKHR(dev, m_vk_swapchain, &nb_swap_images, nullptr);
-
-		if (!nb_swap_images) fmt::throw_exception("Driver returned 0 images for swapchain");
-
 		std::vector<VkImage> vk_images;
-		vk_images.resize(nb_swap_images);
-		_vkGetSwapchainImagesKHR(dev, m_vk_swapchain, &nb_swap_images, vk_images.data());
+		CHECK_RESULT(rsx::presentation::enumerate<VkImage>(
+			[&](u32* count, VkImage* images) { return _vkGetSwapchainImagesKHR(dev, m_vk_swapchain, count, images); },
+			vk_images, VK_SUCCESS, VK_INCOMPLETE));
 
-		swapchain_images.resize(nb_swap_images);
-		for (u32 i = 0; i < nb_swap_images; ++i)
+		if (vk_images.empty()) fmt::throw_exception("Driver returned 0 images for swapchain");
+
+		swapchain_images.resize(vk_images.size());
+		for (u32 i = 0; i < vk_images.size(); ++i)
 		{
 			swapchain_images[i].value = vk_images[i];
 		}
@@ -140,6 +141,8 @@ namespace vk
 			if (m_vk_swapchain)
 			{
 				_vkDestroySwapchainKHR(pdev, m_vk_swapchain, nullptr);
+				m_vk_swapchain = VK_NULL_HANDLE;
+				swapchain_images.clear();
 			}
 
 			dev.destroy();
@@ -204,32 +207,39 @@ namespace vk
 
 		auto [surface_descriptors, should_specify_exclusive_full_screen_mode] = init_surface_capabilities();
 
-		if (surface_descriptors.maxImageExtent.width < m_width ||
-			surface_descriptors.maxImageExtent.height < m_height)
+		const auto extent = rsx::presentation::choose_extent(
+			{m_width, m_height},
+			{surface_descriptors.currentExtent.width, surface_descriptors.currentExtent.height},
+			{surface_descriptors.minImageExtent.width, surface_descriptors.minImageExtent.height},
+			{surface_descriptors.maxImageExtent.width, surface_descriptors.maxImageExtent.height});
+		if (!extent)
 		{
-			rsx_log.error("Swapchain: Swapchain creation failed because dimensions cannot fit. Max = %d, %d, Requested = %d, %d",
-				surface_descriptors.maxImageExtent.width, surface_descriptors.maxImageExtent.height, m_width, m_height);
-
+			// A zero extent is normal while the app/window is not drawable.
 			return false;
 		}
 
-		if (surface_descriptors.currentExtent.width != umax)
+		constexpr VkImageUsageFlags required_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+		if ((surface_descriptors.supportedUsageFlags & required_usage) != required_usage)
 		{
-			if (surface_descriptors.currentExtent.width == 0 || surface_descriptors.currentExtent.height == 0)
-			{
-				rsx_log.warning("Swapchain: Current surface extent is a null region. Is the window minimized?");
-				return false;
-			}
-
-			m_width = surface_descriptors.currentExtent.width;
-			m_height = surface_descriptors.currentExtent.height;
+			rsx_log.error("Swapchain: surface does not support required color-attachment and transfer-destination usage");
+			return false;
 		}
 
-		u32 nb_available_modes = 0;
-		CHECK_RESULT(vkGetPhysicalDeviceSurfacePresentModesKHR(gpu, m_surface, &nb_available_modes, nullptr));
+		constexpr std::array<u32, 4> alpha_preference = {
+			VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
+			VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR, VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR};
+		const auto composite_alpha = rsx::presentation::choose_composite_alpha(
+			surface_descriptors.supportedCompositeAlpha, alpha_preference);
+		if (!composite_alpha)
+		{
+			rsx_log.error("Swapchain: surface exposes no supported composite-alpha mode");
+			return false;
+		}
 
-		std::vector<VkPresentModeKHR> present_modes(nb_available_modes);
-		CHECK_RESULT(vkGetPhysicalDeviceSurfacePresentModesKHR(gpu, m_surface, &nb_available_modes, present_modes.data()));
+		std::vector<VkPresentModeKHR> present_modes;
+		CHECK_RESULT(rsx::presentation::enumerate<VkPresentModeKHR>(
+			[&](u32* count, VkPresentModeKHR* modes) { return vkGetPhysicalDeviceSurfacePresentModesKHR(gpu, m_surface, count, modes); },
+			present_modes, VK_SUCCESS, VK_INCOMPLETE));
 
 		VkPresentModeKHR swapchain_present_mode = VK_PRESENT_MODE_FIFO_KHR;
 		std::vector<VkPresentModeKHR> preferred_modes;
@@ -269,19 +279,8 @@ namespace vk
 
 		rsx_log.notice("Swapchain: present mode %d in use.", static_cast<int>(swapchain_present_mode));
 
-		u32 nb_swap_images = surface_descriptors.minImageCount + 1;
-		if (surface_descriptors.maxImageCount > 0)
-		{
-			//Try to negotiate for a triple buffer setup
-			//In cases where the front-buffer isnt available for present, its better to have a spare surface
-			nb_swap_images = std::max(surface_descriptors.minImageCount + 2u, 3u);
-
-			if (nb_swap_images > surface_descriptors.maxImageCount)
-			{
-				// Application must settle for fewer images than desired:
-				nb_swap_images = surface_descriptors.maxImageCount;
-			}
-		}
+		const u32 nb_swap_images = rsx::presentation::choose_image_count(
+			surface_descriptors.minImageCount, surface_descriptors.maxImageCount);
 
 		VkSurfaceTransformFlagBitsKHR pre_transform = surface_descriptors.currentTransform;
 		if (surface_descriptors.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
@@ -294,17 +293,16 @@ namespace vk
 		swap_info.imageFormat = m_surface_format;
 		swap_info.imageColorSpace = m_color_space;
 
-		swap_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+		swap_info.imageUsage = required_usage;
 		swap_info.preTransform = pre_transform;
-		swap_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+		swap_info.compositeAlpha = static_cast<VkCompositeAlphaFlagBitsKHR>(*composite_alpha);
 		swap_info.imageArrayLayers = 1;
 		swap_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
 		swap_info.presentMode = swapchain_present_mode;
 		swap_info.oldSwapchain = old_swapchain;
 		swap_info.clipped = true;
 
-		swap_info.imageExtent.width = std::max(m_width, surface_descriptors.minImageExtent.width);
-		swap_info.imageExtent.height = std::max(m_height, surface_descriptors.minImageExtent.height);
+		swap_info.imageExtent = {extent->width, extent->height};
 
 #ifdef _WIN32
 		VkSurfaceFullScreenExclusiveInfoEXT full_screen_exclusive_info = {};
@@ -323,18 +321,27 @@ namespace vk
 		rsx_log.notice("Swapchain: requesting full screen exclusive mode %d.", static_cast<int>(full_screen_exclusive_info.fullScreenExclusive));
 #endif
 
-		_vkCreateSwapchainKHR(dev, &swap_info, nullptr, &m_vk_swapchain);
+		VkSwapchainKHR new_swapchain = VK_NULL_HANDLE;
+		const VkResult status = _vkCreateSwapchainKHR(dev, &swap_info, nullptr, &new_swapchain);
 
+		// Passing oldSwapchain retires it even when creation fails. Never reuse
+		// that handle on a retry, or enumerate images through a failed output.
+		m_vk_swapchain = VK_NULL_HANDLE;
+		swapchain_images.clear();
 		if (old_swapchain)
-		{
-			if (!swapchain_images.empty())
-			{
-				swapchain_images.clear();
-			}
-
 			_vkDestroySwapchainKHR(dev, old_swapchain, nullptr);
+
+		if (status != VK_SUCCESS)
+		{
+			rsx_log.error("Swapchain: creation failed with VkResult %d", static_cast<int>(status));
+			if (status == VK_ERROR_DEVICE_LOST)
+				vk::die_with_error(status);
+			return false;
 		}
 
+		m_vk_swapchain = new_swapchain;
+		m_width = extent->width;
+		m_height = extent->height;
 		init_swapchain_images(dev);
 		return true;
 	}

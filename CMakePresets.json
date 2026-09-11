@@ -114,6 +114,30 @@
       "cacheVariables": {
         "CMAKE_OSX_SYSROOT": "iphonesimulator"
       }
+    },
+    {
+      "name": "ios-device-vulkan",
+      "displayName": "iOS device ARM64 + Vulkan (caller-provided MoltenVK)",
+      "inherits": "ios-device",
+      "binaryDir": "${sourceDir}/build-ios-device-vulkan",
+      "cacheVariables": {
+        "USE_VULKAN": "ON",
+        "USE_SYSTEM_MVK": "ON",
+        "Vulkan_INCLUDE_DIR": "$env{RPCS3_IOS_MOLTENVK_INCLUDE_DIR}",
+        "Vulkan_LIBRARY": "$env{RPCS3_IOS_MOLTENVK_LIBRARY}"
+      }
+    },
+    {
+      "name": "ios-simulator-vulkan",
+      "displayName": "iOS simulator ARM64 + Vulkan (caller-provided MoltenVK)",
+      "inherits": "ios-simulator",
+      "binaryDir": "${sourceDir}/build-ios-simulator-vulkan",
+      "cacheVariables": {
+        "USE_VULKAN": "ON",
+        "USE_SYSTEM_MVK": "ON",
+        "Vulkan_INCLUDE_DIR": "$env{RPCS3_IOS_MOLTENVK_INCLUDE_DIR}",
+        "Vulkan_LIBRARY": "$env{RPCS3_IOS_MOLTENVK_LIBRARY}"
+      }
     }
   ],
   "buildPresets": [
@@ -134,6 +158,14 @@
     {
       "name": "ios-simulator",
       "configurePreset": "ios-simulator"
+    },
+    {
+      "name": "ios-device-vulkan",
+      "configurePreset": "ios-device-vulkan"
+    },
+    {
+      "name": "ios-simulator-vulkan",
+      "configurePreset": "ios-simulator-vulkan"
     }
   ]
 }

@@ -116,6 +116,7 @@ private:
 	vk::framebuffer_holder* m_draw_fbo = nullptr;
 
 	sizeu m_swapchain_dims{};
+	sizeu m_swapchain_requested_dims{}; // Window size, distinct from the negotiated surface extent
 	bool swapchain_unavailable = false;
 	bool should_reinitialize_swapchain = false;
 
@@ -166,6 +167,9 @@ private:
 	std::unique_ptr<rsx::data_heap::bulk_allocator<256, 16>> m_fragment_constants_allocator;
 
 	std::vector<vk::frame_context_t> m_frame_context_storage;
+	// QueuePresent's wait semaphore belongs to an acquired image, not a CPU
+	// frame slot; a graphics fence alone does not prove presentation is finished.
+	std::vector<std::unique_ptr<vk::semaphore>> m_present_semaphores;
 	u32 m_max_async_frames = 0u;
 	// Temp frame context to use if the real frame queue is overburdened. Only used for storage
 	vk::frame_context_t m_aux_frame_context;
@@ -227,6 +231,7 @@ private:
 	void frame_context_cleanup(vk::frame_context_t *ctx);
 	void advance_queued_frames();
 	void present(vk::frame_context_t *ctx);
+	void reset_present_semaphores();
 	bool reinitialize_swapchain();
 
 	vk::viewable_image* get_present_source(vk::present_surface_info* info, const rsx::avconf& avconfig);

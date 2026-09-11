@@ -475,12 +475,18 @@ VKGSRender::VKGSRender(utils::serial* ar) noexcept : GSRender(ar)
 	vk::set_current_renderer(m_swapchain->get_device());
 	vk::init();
 
-	m_swapchain_dims.width = m_frame->client_width();
-	m_swapchain_dims.height = m_frame->client_height();
+	m_swapchain_requested_dims.width = m_frame->client_width();
+	m_swapchain_requested_dims.height = m_frame->client_height();
+	m_swapchain_dims = m_swapchain_requested_dims;
 
-	if (!m_swapchain->init(m_swapchain_dims.width, m_swapchain_dims.height))
+	if (!m_swapchain->init(m_swapchain_requested_dims.width, m_swapchain_requested_dims.height))
 	{
 		swapchain_unavailable = true;
+	}
+	else
+	{
+		const auto extent = m_swapchain->get_extent();
+		m_swapchain_dims = {extent.width, extent.height};
 	}
 
 	// create command buffer...
@@ -584,7 +590,9 @@ VKGSRender::VKGSRender(utils::serial* ar) noexcept : GSRender(ar)
 		rsx_log.warning("Current driver may crash due to memory limitations (%uk)", m_texbuffer_view_size / 1024);
 	}
 
-	m_max_async_frames = m_swapchain->get_swap_image_count();
+	// Keep one CPU context while an initially hidden surface has no images.
+	// It is never presented and is replaced after successful initialization.
+	m_max_async_frames = std::max<u32>(1, m_swapchain->get_swap_image_count());
 	m_frame_context_storage.resize(m_max_async_frames);
 	m_current_frame = &m_frame_context_storage[0];
 
@@ -592,6 +600,7 @@ VKGSRender::VKGSRender(utils::serial* ar) noexcept : GSRender(ar)
 	{
 		ctx.init(*m_device);
 	}
+	reset_present_semaphores();
 
 	const auto& memory_map = m_device->get_memory_mapping();
 	null_buffer = std::make_unique<vk::buffer>(*m_device, 32, memory_map.device_local, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT, 0, VMM_ALLOCATION_POOL_UNDEFINED);
@@ -616,18 +625,8 @@ VKGSRender::VKGSRender(utils::serial* ar) noexcept : GSRender(ar)
 
 	m_shaders_cache = std::make_unique<vk::shader_cache>(*m_prog_buffer, "vulkan", "v1.95");
 
-	for (u32 i = 0; i < m_swapchain->get_swap_image_count(); ++i)
-	{
-		const auto target_layout = m_swapchain->get_optimal_present_layout();
-		const auto target_image = m_swapchain->get_image(i);
-		VkClearColorValue clear_color{};
-		VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-
-		vk::change_image_layout(*m_current_command_buffer, target_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, range);
-		vkCmdClearColorImage(*m_current_command_buffer, target_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_color, 1, &range);
-		vk::change_image_layout(*m_current_command_buffer, target_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, target_layout, range);
-
-	}
+	// Swapchain images may only be touched after acquisition. Initialization
+	// happens in flip(), on the same submission that waits for image acquire.
 
 	m_texture_cache.initialize((*m_device), m_device->get_graphics_queue(),
 			m_texture_upload_buffer_ring_info);
@@ -857,6 +856,7 @@ VKGSRender::~VKGSRender()
 	}
 	m_current_frame = nullptr;
 	m_frame_context_storage.clear();
+	m_present_semaphores.clear();
 
 	// Textures
 	m_rtts.destroy();

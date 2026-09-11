@@ -661,6 +661,10 @@ if(TARGET 3rdparty_vulkan)
         target_sources(rpcs3_emu PRIVATE
             RSX/VK/vkutils/metal_layer.mm
         )
+        if(RPCS3_IOS)
+            set_source_files_properties(RSX/VK/vkutils/metal_layer.mm PROPERTIES
+                COMPILE_OPTIONS "-fobjc-arc")
+        endif()
     endif()
 endif()
 

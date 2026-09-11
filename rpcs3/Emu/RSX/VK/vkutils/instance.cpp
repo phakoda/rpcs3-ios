@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "instance.h"
+#include "Emu/RSX/Common/presentation_policy.h"
 
 namespace vk
 {
@@ -371,38 +372,20 @@ namespace vk
 			return swapchain;
 		}
 
-		// Get the list of VkFormat's that are supported:
-		u32 formatCount;
-		CHECK_RESULT(vkGetPhysicalDeviceSurfaceFormatsKHR(dev, m_surface, &formatCount, nullptr));
+		std::vector<VkSurfaceFormatKHR> formats;
+		CHECK_RESULT(rsx::presentation::enumerate<VkSurfaceFormatKHR>(
+			[&](u32* count, VkSurfaceFormatKHR* values) { return vkGetPhysicalDeviceSurfaceFormatsKHR(dev, m_surface, count, values); },
+			formats, VK_SUCCESS, VK_INCOMPLETE));
 
-		std::vector<VkSurfaceFormatKHR> surfFormats(formatCount);
-		CHECK_RESULT(vkGetPhysicalDeviceSurfaceFormatsKHR(dev, m_surface, &formatCount, surfFormats.data()));
+		// Select the format and color space as a pair. Mixing entries can create
+		// an unsupported swapchain or incorrectly tag SDR pixels as wide gamut.
+		const auto selected = rsx::presentation::choose_surface_format<VkSurfaceFormatKHR>(
+			formats, VK_FORMAT_UNDEFINED, VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
+		if (!selected) fmt::throw_exception("Format count is zero!");
 
-		VkFormat format;
-		VkColorSpaceKHR color_space;
-
-		if (formatCount == 1 && surfFormats[0].format == VK_FORMAT_UNDEFINED)
-		{
-			format = VK_FORMAT_B8G8R8A8_UNORM;
-		}
-		else
-		{
-			if (!formatCount) fmt::throw_exception("Format count is zero!");
-			format = surfFormats[0].format;
-
-			//Prefer BGRA8_UNORM to avoid sRGB compression (RADV)
-			for (auto& surface_format : surfFormats)
-			{
-				if (surface_format.format == VK_FORMAT_B8G8R8A8_UNORM)
-				{
-					format = VK_FORMAT_B8G8R8A8_UNORM;
-					break;
-				}
-			}
-		}
-
-		color_space = surfFormats[0].colorSpace;
-
-		return new swapchain_WSI(dev, present_queue_idx, graphics_queue_idx, transfer_queue_idx, format, m_surface, color_space, !surface_config.supports_automatic_wm_reports);
+		auto swapchain = new swapchain_WSI(dev, present_queue_idx, graphics_queue_idx, transfer_queue_idx,
+			selected->format, m_surface, selected->colorSpace, !surface_config.supports_automatic_wm_reports);
+		swapchain->create(window_handle);
+		return swapchain;
 	}
 }

@@ -21,6 +21,36 @@ For Apple Silicon Simulator, point `RPCS3_IOS_FFMPEG_ROOT` at an arm64
 FFmpeg's Mach-O platform metadata and rejects a device/simulator mismatch.
 The resulting Ninja bundle is under `build-ios-*/bin/rpcs3.app`.
 
+### Vulkan-enabled iOS builds
+
+The original `ios-device` and `ios-simulator` presets intentionally disable
+Vulkan. To include the graphics backend, use `ios-device-vulkan` or
+`ios-simulator-vulkan` with target-built MoltenVK in addition to the Qt and
+FFmpeg roots above:
+
+```sh
+export RPCS3_IOS_MOLTENVK_INCLUDE_DIR=/path/to/MoltenVK/include
+export RPCS3_IOS_MOLTENVK_LIBRARY=/path/to/iphoneos/libMoltenVK.a
+cmake --preset ios-device-vulkan
+cmake --build --preset ios-device-vulkan
+```
+
+The include root must contain both `vulkan/vulkan.h` and
+`MoltenVK/mvk_vulkan.h`. Select the actual library file, not the enclosing
+`.xcframework` directory. For the simulator, supply its ARM64 library slice,
+matching Qt/FFmpeg dependencies, and use `ios-simulator-vulkan`. Configuration
+checks all ARM64 Mach-O members for the correct Apple platform and a minimum
+OS no newer than the deployment target. Python 3.8 or newer is required for
+that check. This validates target metadata, not all dependency symbols or
+MoltenVK feature support.
+
+These presets retain `WITH_LLVM=OFF` from the first-stage build. They enable
+the renderer; they do not establish a working or fast PPU/SPU recompiler or a
+game-compatibility guarantee. See [IOS_IMPROVEMENTS.md](IOS_IMPROVEMENTS.md) for
+the exact changes, reproducible regression tests, and remaining device checks.
+
+### Signing and runtime prerequisites
+
 The default entitlements file enables extended virtual addressing, which is
 required by RPCS3's guest-memory mirrors. Restricted JIT capabilities must be
 supplied through `RPCS3_IOS_ENTITLEMENTS_FILE`, and the signing profile used
