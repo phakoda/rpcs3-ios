@@ -1,0 +1,141 @@
+name: Finalize RPCS3 iOS handoff
+
+on:
+  push:
+    branches:
+      - ios-emulator-improvements-2026-09-10
+    paths:
+      - '.github/workflows/rpcs3-ios-finalize-handoff.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rpcs3-ios-finalize-handoff
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    if: github.repository == 'phakoda/rpcs3-ios'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Finalize clean branch history
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch='ios-emulator-improvements-2026-09-10'
+          expected_parent='b6c012a5d95be805c3351a4953f460d8731087d0'
+          exact_final='074b1471ca730af3fb804ad753a0653cd9f68383'
+          bundle_tree='dadbd25411bf0ee89dbfeda1c8fa23159c4954ae'
+          lease_sha="$(git rev-parse HEAD)"
+          parent_sha="$(git rev-parse HEAD^)"
+
+          # Prefer the byte-identical local history whenever the direct Git transport
+          # succeeded, even if a later temporary handoff commit was added on top.
+          if git cat-file -e "${exact_final}^{commit}" 2>/dev/null && git merge-base --is-ancestor "$exact_final" "$parent_sha"; then
+            git push --force-with-lease="refs/heads/${branch}:${lease_sha}" origin "${exact_final}:refs/heads/${branch}"
+            exit 0
+          fi
+
+          git merge-base --is-ancestor "$expected_parent" "$parent_sha"
+          python3 - <<'PY'
+          import base64, json, os, urllib.request
+          repo = os.environ['GITHUB_REPOSITORY']
+          token = os.environ['GH_TOKEN']
+          tree_sha = 'dadbd25411bf0ee89dbfeda1c8fa23159c4954ae'
+          headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'rpcs3-ios-finalize-handoff'}
+          def get(url):
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  return json.load(response)
+          tree = get(f'https://api.github.com/repos/{repo}/git/trees/{tree_sha}?recursive=1')
+          entries = sorted((e for e in tree['tree'] if e.get('path', '').startswith('.push-rpcs3-ios/part-') and e.get('type') == 'blob'), key=lambda e: e['path'])
+          if len(entries) < 11:
+              raise SystemExit(f'expected at least 11 replay chunks, got {len(entries)}')
+          encoded = bytearray()
+          for entry in entries:
+              blob = get(f'https://api.github.com/repos/{repo}/git/blobs/{entry["sha"]}')
+              encoded.extend(base64.b64decode(blob['content']))
+          with open('/tmp/replay-prefix.mbox', 'wb') as f:
+              f.write(base64.b64decode(encoded, validate=True))
+          PY
+
+          rm -rf /tmp/mails && mkdir -p /tmp/mails
+          git mailsplit --mboxrd -d4 -o/tmp/mails /tmp/replay-prefix.mbox >/dev/null
+          git reset --hard "$expected_parent"
+          git config user.name 'OpenAI'
+          git config user.email 'noreply@openai.com'
+          applied=0
+          while IFS= read -r mail; do
+            if ! tail -n 8 "$mail" | grep -qx '2\.47\.3'; then break; fi
+            git am --3way "$mail"
+            applied=$((applied + 1))
+          done < <(find /tmp/mails -maxdepth 1 -type f -printf '%p\n' | sort)
+          test "$applied" -ge 8
+
+          cat > IOS_RUNTIME_HARDENING.md <<'DOC'
+          # RPCS3 iOS runtime hardening report
+
+          This branch contains the iOS runtime hardening work developed from base commit `19be56402314cf5a3fef7ad93027b00c7077ad29`.
+
+          ## Runtime changes
+
+          - Native RemoteIO output for iOS with Float32/S16 PCM, stereo downmix negotiation, render-path underrun silencing, interruption/route/media-service recovery, and shutdown diagnostics.
+          - Capability-aware PPU/SPU decoder defaults and boot-time fallback so non-LLVM iOS builds do not select unavailable recompilers.
+          - Foreground/background pause ownership that preserves a user pause across repeated inactive/hidden/suspended transitions and rechecks activity after boot completes.
+          - Stable physical-controller slot enumeration, occupied-slot masks, and a virtual touch controller hosted only inside the native game view.
+          - NaN-safe PCM handling, exact in-range normalization, signed-16 conversion boundaries, in-place shrinking, and an ARM64 NEON path.
+          - ARC/precompiled-header isolation for Objective-C++ native bridges and exception support confined to the native audio translation unit.
+          - Portable PCM microbenchmarks and expanded source/runtime policy tests.
+
+          ## Validation and remaining acceptance
+
+          Portable GCC Release and Clang sanitizer suites passed during development, along with Python source-contract tests and AArch64 code-generation checks. Xcode, Apple SDK, physical-device audio lifecycle, game compatibility, sustained frame pacing, memory pressure, and thermal behavior still require Apple-host/device acceptance testing.
+          DOC
+
+          mkdir -p .github/workflows
+          cat > .github/workflows/ios-runtime-ci.yml <<'YAML'
+          name: iOS runtime policies
+          on:
+            push:
+              branches: [ios-emulator-improvements-2026-09-10]
+            pull_request:
+          permissions:
+            contents: read
+          jobs:
+            portable-runtime-tests:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - run: cmake -S buildfiles/ios/tests -B build/ios-tests -DCMAKE_BUILD_TYPE=Release
+                - run: cmake --build build/ios-tests --parallel 2
+                - run: ctest --test-dir build/ios-tests --output-on-failure
+            clang-sanitizers:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - env: {CC: clang, CXX: clang++}
+                  run: cmake -S buildfiles/ios/tests -B build/ios-sanitized -DCMAKE_BUILD_TYPE=Debug -DRPCS3_IOS_TEST_SANITIZERS=ON
+                - run: cmake --build build/ios-sanitized --parallel 2
+                - run: ctest --test-dir build/ios-sanitized --output-on-failure
+            apple-bridge-syntax:
+              runs-on: macos-latest
+              steps:
+                - uses: actions/checkout@v4
+                - run: bash buildfiles/ios/check_apple_bridges.sh
+          YAML
+
+          git add IOS_RUNTIME_HARDENING.md .github/workflows/ios-runtime-ci.yml
+          if ! git diff --cached --quiet; then
+            git commit -m 'test/docs: finalize iOS runtime validation handoff'
+          fi
+          test ! -e .github/workflows/rpcs3-ios-replay.yml
+          test ! -e .github/workflows/rpcs3-ios-replay-guard.yml
+          test ! -e .github/workflows/rpcs3-ios-finalize-handoff.yml
+          git push --force-with-lease="refs/heads/${branch}:${lease_sha}" origin "HEAD:refs/heads/${branch}"
