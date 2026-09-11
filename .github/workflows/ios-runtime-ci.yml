@@ -1,0 +1,57 @@
+name: iOS runtime policies
+
+on:
+  push:
+    branches:
+      - ios-emulator-improvements-2026-09-10
+    paths:
+      - 'buildfiles/ios/**'
+      - 'rpcs3/Emu/Audio/**'
+      - 'rpcs3/Emu/Cell/**'
+      - 'rpcs3/Input/ios_*'
+      - 'rpcs3/rpcs3qt/**'
+      - '.github/workflows/ios-runtime-ci.yml'
+  pull_request:
+    paths:
+      - 'buildfiles/ios/**'
+      - 'rpcs3/Emu/Audio/**'
+      - 'rpcs3/Emu/Cell/**'
+      - 'rpcs3/Input/ios_*'
+      - 'rpcs3/rpcs3qt/**'
+      - '.github/workflows/ios-runtime-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  portable-runtime-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure Release policy tests
+        run: cmake -S buildfiles/ios/tests -B build/ios-tests -DCMAKE_BUILD_TYPE=Release
+      - name: Build policy tests
+        run: cmake --build build/ios-tests --parallel 2
+      - name: Run policy tests
+        run: ctest --test-dir build/ios-tests --output-on-failure
+
+  clang-sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure sanitized policy tests
+        env:
+          CC: clang
+          CXX: clang++
+        run: cmake -S buildfiles/ios/tests -B build/ios-sanitized -DCMAKE_BUILD_TYPE=Debug -DRPCS3_IOS_TEST_SANITIZERS=ON
+      - name: Build sanitized policy tests
+        run: cmake --build build/ios-sanitized --parallel 2
+      - name: Run sanitized policy tests
+        run: ctest --test-dir build/ios-sanitized --output-on-failure
+
+  apple-bridge-syntax:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Objective-C++ iOS bridges against installed Apple SDKs
+        run: bash buildfiles/ios/check_apple_bridges.sh
